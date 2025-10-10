@@ -98,7 +98,6 @@ services:
   - type: web
     name: adres-frontend
     runtime: static
-    plan: starter
     branch: main
     buildCommand: |
       npm install &&
