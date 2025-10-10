@@ -24,10 +24,7 @@ services:
       - key: PORT
         value: 10000
       - key: FRONTEND_URL
-        fromService:
-          name: adres-frontend
-          type: web
-          property: url
+        sync: false
       - key: REDIS_URL
         fromService:
           name: adres-redis
@@ -101,7 +98,6 @@ services:
   - type: web
     name: adres-frontend
     runtime: static
-    region: oregon
     plan: free
     branch: main
     buildCommand: |
@@ -110,15 +106,9 @@ services:
     staticPublishPath: ./frontend/dist
     envVars:
       - key: VITE_API_URL
-        fromService:
-          name: adres-backend
-          type: web
-          property: url
+        sync: false
       - key: VITE_WS_URL
-        fromService:
-          name: adres-backend
-          type: web
-          property: url
+        sync: false
     routes:
       - type: rewrite
         source: /*
