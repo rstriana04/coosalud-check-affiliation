@@ -7,13 +7,16 @@ services:
     ipAllowList: []
 
   - type: web
-    name: adres-automation
+    name: adres-backend
     runtime: node
     region: oregon
-    plan: free
+    plan: starter
     branch: main
-    buildCommand: npm run install:all && npm run build
-    startCommand: npm start
+    buildCommand: |
+      npm install &&
+      cd backend && npm install &&
+      npx playwright install --with-deps chromium
+    startCommand: cd backend && npm start
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
@@ -21,16 +24,15 @@ services:
       - key: PORT
         value: 10000
       - key: FRONTEND_URL
-        sync: false
-      - key: TWOCAPTCHA_API_KEY
-        sync: false
+        fromService:
+          name: adres-frontend
+          type: web
+          property: url
       - key: REDIS_URL
         fromService:
           name: adres-redis
           type: redis
           property: connectionString
-      - key: ADRES_URL
-        value: https://adres.gov.co/consulte-su-eps
       - key: HEADLESS_MODE
         value: true
       - key: TIMEOUT_MS
@@ -45,8 +47,80 @@ services:
         value: 10
       - key: MAX_RETRIES
         value: 3
+      - key: JOB_PROGRESS_TTL
+        value: 3600
+      - key: JOB_HISTORY_TTL
+        value: 604800
     disk:
       name: adres-storage
       mountPath: /opt/render/project/src/backend
       sizeGB: 1
+
+  - type: worker
+    name: adres-worker
+    runtime: node
+    region: oregon
+    plan: starter
+    branch: main
+    buildCommand: |
+      npm install &&
+      cd backend && npm install &&
+      npx playwright install --with-deps chromium
+    startCommand: cd backend && node src/workers/scraper.worker.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: REDIS_URL
+        fromService:
+          name: adres-redis
+          type: redis
+          property: connectionString
+      - key: HEADLESS_MODE
+        value: true
+      - key: TIMEOUT_MS
+        value: 30000
+      - key: MIN_DELAY_MS
+        value: 3000
+      - key: MAX_DELAY_MS
+        value: 5000
+      - key: MAX_WORKERS
+        value: 2
+      - key: BATCH_SIZE
+        value: 10
+      - key: MAX_RETRIES
+        value: 3
+      - key: JOB_PROGRESS_TTL
+        value: 3600
+      - key: JOB_HISTORY_TTL
+        value: 604800
+    disk:
+      name: adres-worker-storage
+      mountPath: /opt/render/project/src/backend
+      sizeGB: 1
+
+  - type: web
+    name: adres-frontend
+    runtime: static
+    region: oregon
+    plan: free
+    branch: main
+    buildCommand: |
+      npm install &&
+      cd frontend && npm install && npm run build
+    staticPublishPath: ./frontend/dist
+    envVars:
+      - key: VITE_API_URL
+        fromService:
+          name: adres-backend
+          type: web
+          property: url
+      - key: VITE_WS_URL
+        fromService:
+          name: adres-backend
+          type: web
+          property: url
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
 
