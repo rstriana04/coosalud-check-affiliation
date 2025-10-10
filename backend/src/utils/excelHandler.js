@@ -1,4 +1,4 @@
-import XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { ExcelColumns } from '../../../shared/types.js';
 import { logger } from './logger.js';
 
@@ -10,16 +10,24 @@ export class ExcelHandler {
     this.records = [];
   }
 
-  read() {
+  async read() {
     try {
-      this.workbook = XLSX.readFile(this.filePath);
-      const sheetName = this.workbook.SheetNames[0];
-      this.worksheet = this.workbook.Sheets[sheetName];
+      this.workbook = new ExcelJS.Workbook();
+      await this.workbook.xlsx.readFile(this.filePath);
       
-      const data = XLSX.utils.sheet_to_json(this.worksheet, { 
-        header: 1,
-        defval: '',
-        raw: false
+      this.worksheet = this.workbook.worksheets[0];
+      
+      if (!this.worksheet) {
+        throw new Error('No worksheet found in Excel file');
+      }
+
+      const data = [];
+      this.worksheet.eachRow((row, rowNumber) => {
+        const rowValues = [];
+        row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+          rowValues.push(cell.value !== null && cell.value !== undefined ? String(cell.value) : '');
+        });
+        data.push(rowValues);
       });
 
       const headerRowIndex = 2;
@@ -100,17 +108,11 @@ export class ExcelHandler {
         throw new Error('Worksheet not loaded');
       }
 
-      const cellAddress = XLSX.utils.encode_cell({
-        r: rowIndex,
-        c: ExcelColumns.FECHA_AFILIACION - 1
-      });
+      const excelRowNumber = rowIndex + 1;
+      const cell = this.worksheet.getRow(excelRowNumber).getCell(ExcelColumns.FECHA_AFILIACION);
+      cell.value = fechaAfiliacion;
 
-      this.worksheet[cellAddress] = {
-        t: 's',
-        v: fechaAfiliacion
-      };
-
-      logger.debug(`Updated row ${rowIndex + 1} with date: ${fechaAfiliacion}`);
+      logger.debug(`Updated row ${excelRowNumber} with date: ${fechaAfiliacion}`);
       return true;
     } catch (error) {
       logger.error('Error updating Excel record', { 
@@ -121,13 +123,13 @@ export class ExcelHandler {
     }
   }
 
-  save(outputPath) {
+  async save(outputPath) {
     try {
       if (!this.workbook) {
         throw new Error('Workbook not loaded');
       }
 
-      XLSX.writeFile(this.workbook, outputPath);
+      await this.workbook.xlsx.writeFile(outputPath);
       logger.info(`Excel file saved: ${outputPath}`);
       return outputPath;
     } catch (error) {
@@ -145,18 +147,19 @@ export class ExcelHandler {
   }
 }
 
-export const validateExcelFile = (filePath) => {
+export const validateExcelFile = async (filePath) => {
   try {
-    const workbook = XLSX.readFile(filePath);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(filePath);
     
-    if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+    if (!workbook.worksheets || workbook.worksheets.length === 0) {
       return { valid: false, error: 'No sheets found in Excel file' };
     }
 
-    const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-    const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+    const worksheet = workbook.worksheets[0];
+    const rowCount = worksheet.rowCount;
 
-    if (data.length < 4) {
+    if (rowCount < 4) {
       return { 
         valid: false, 
         error: 'Excel file must have at least 4 rows (metadata + headers + data)' 

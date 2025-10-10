@@ -8,15 +8,11 @@ services:
 
   - type: web
     name: adres-backend
-    runtime: node
+    runtime: docker
     region: oregon
     plan: starter
     branch: main
-    buildCommand: |
-      npm install &&
-      cd backend && npm install &&
-      npx playwright install --with-deps chromium
-    startCommand: cd backend && npm start
+    dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
@@ -55,15 +51,11 @@ services:
 
   - type: worker
     name: adres-worker
-    runtime: node
+    runtime: docker
     region: oregon
     plan: starter
     branch: main
-    buildCommand: |
-      npm install &&
-      cd backend && npm install &&
-      npx playwright install --with-deps chromium
-    startCommand: cd backend && node src/workers/scraper.worker.js
+    dockerfilePath: ./Dockerfile.worker
     envVars:
       - key: NODE_ENV
         value: production

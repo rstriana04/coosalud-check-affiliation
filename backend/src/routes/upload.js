@@ -70,14 +70,14 @@ router.post('/', upload.single('file'), async (req, res, next) => {
       size: req.file.size 
     });
 
-    const validation = validateExcelFile(filePath);
+    const validation = await validateExcelFile(filePath);
     
     if (!validation.valid) {
       throw new AppError(validation.error, 400);
     }
 
     const excelHandler = new ExcelHandler(filePath);
-    const records = excelHandler.read();
+    const records = await excelHandler.read();
 
     if (records.length === 0) {
       throw new AppError('No valid records found in Excel file', 400);

@@ -75,7 +75,7 @@ router.post('/:id/start', validate(startJobSchema), async (req, res, next) => {
     const excelHandler = new ExcelHandler(sourceFile);
     const records = excelHandler.getRecords().length > 0 
       ? excelHandler.getRecords() 
-      : excelHandler.read();
+      : await excelHandler.read();
 
     await addBatchScraperJobs(jobId, records);
 
@@ -186,7 +186,7 @@ router.get('/:id/download', validate(jobIdSchema), async (req, res, next) => {
     }
 
     const excelHandler = new ExcelHandler(sourceFile);
-    excelHandler.read();
+    await excelHandler.read();
 
     const records = progressService.getAllRecords();
     
@@ -199,7 +199,7 @@ router.get('/:id/download', validate(jobIdSchema), async (req, res, next) => {
     const outputFilename = `processed-${jobId}.xlsx`;
     const outputPath = join(PROCESSED_DIR, outputFilename);
     
-    excelHandler.save(outputPath);
+    await excelHandler.save(outputPath);
 
     const progressData = progressService.getProgress();
     await JobHistoryService.saveJob({
