@@ -1,5 +1,7 @@
 FROM mcr.microsoft.com/playwright:v1.40.1-jammy
 
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
 WORKDIR /app
 
 COPY package*.json ./

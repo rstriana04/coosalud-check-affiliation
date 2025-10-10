@@ -22,7 +22,7 @@ export class ExcelHandler {
       }
 
       const data = [];
-      this.worksheet.eachRow((row, rowNumber) => {
+      this.worksheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
         const rowValues = [];
         row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
           rowValues.push(cell.value !== null && cell.value !== undefined ? String(cell.value) : '');
