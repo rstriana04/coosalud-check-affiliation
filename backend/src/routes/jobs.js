@@ -5,6 +5,8 @@ import { existsSync, readdirSync } from 'fs';
 import { ProgressService } from '../services/progressService.js';
 import { ExcelHandler } from '../utils/excelHandler.js';
 import { addBatchScraperJobs, pauseQueue, resumeQueue, obliterateQueue, cancelJobsByPrefix } from '../services/queueService.js';
+import { CleanupService } from '../services/cleanupService.js';
+import { JobHistoryService } from '../services/jobHistoryService.js';
 import { logger } from '../utils/logger.js';
 import { NotFoundError, AppError } from '../middleware/errorHandler.js';
 import { validate, jobIdSchema, startJobSchema } from '../middleware/validator.js';
@@ -138,14 +140,22 @@ router.post('/:id/cancel', validate(jobIdSchema), async (req, res, next) => {
     await cancelJobsByPrefix(jobId);
     await obliterateQueue();
 
-    logger.info('Processing cancelled', { jobId });
+    const progressService = new ProgressService(jobId);
+    await progressService.delete();
+    logger.debug('Progress data deleted from Redis', { jobId });
+
+    const retryService = new RetryService(jobId);
+    await retryService.clearFailedRecords();
+    logger.debug('Failed records cleared from Redis', { jobId });
+
+    logger.info('Processing cancelled and data cleaned', { jobId });
     
     emitJobCancelled(jobId);
     emitLog('error', 'Processing cancelled', {});
 
     res.json({
       success: true,
-      message: 'Processing cancelled'
+      message: 'Processing cancelled and cleaned'
     });
   } catch (error) {
     next(error);
@@ -182,7 +192,7 @@ router.get('/:id/download', validate(jobIdSchema), async (req, res, next) => {
     
     records.forEach(record => {
       if (record.status === RecordStatus.SUCCESS && record.fechaAfiliacion) {
-        excelHandler.updateRecord(record.index, record.fechaAfiliacion);
+        excelHandler.updateRecord(record.rowIndex, record.fechaAfiliacion);
       }
     });
 
@@ -191,12 +201,26 @@ router.get('/:id/download', validate(jobIdSchema), async (req, res, next) => {
     
     excelHandler.save(outputPath);
 
+    const progressData = progressService.getProgress();
+    await JobHistoryService.saveJob({
+      jobId,
+      filename: files[0],
+      totalRecords: progressData.total,
+      processed: progressData.processed,
+      success: progressData.success,
+      failed: progressData.failed,
+      startTime: progressData.startTime,
+      status: progressData.processed >= progressData.total ? 'completed' : 'partial'
+    });
+
     logger.info('File download requested', { jobId, outputPath });
 
-    res.download(outputPath, `adres-processed-${Date.now()}.xlsx`, (err) => {
+    res.download(outputPath, `coosalud-afiliacion-${Date.now()}.xlsx`, async (err) => {
       if (err) {
         logger.error('Error downloading file', { error: err.message });
         next(err);
+      } else {
+        await CleanupService.cleanupJob(jobId);
       }
     });
   } catch (error) {

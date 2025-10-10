@@ -1,19 +1,20 @@
-import { writeFile, readFile, mkdir } from 'fs/promises';
-import { existsSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { Redis } from 'ioredis';
 import { RecordStatus } from '../../../shared/types.js';
 import { logger } from '../utils/logger.js';
+import { config } from '../config/config.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const connection = new Redis(config.redis.url, {
+  maxRetriesPerRequest: null
+});
 
-const PROGRESS_DIR = join(__dirname, '../../progress');
+connection.on('error', (err) => {
+  logger.error('Redis connection error in ProgressService', { error: err.message });
+});
 
 export class ProgressService {
   constructor(jobId) {
     this.jobId = jobId;
-    this.progressFile = join(PROGRESS_DIR, `${jobId}.json`);
+    this.redisKey = `job:${jobId}:progress`;
     this.progress = {
       jobId,
       total: 0,
@@ -28,11 +29,10 @@ export class ProgressService {
   }
 
   async initialize(records) {
-    await this.ensureProgressDir();
-    
     this.progress.total = records.length;
     this.progress.records = records.map((record, index) => ({
       index,
+      rowIndex: record.rowIndex,
       tipoDocumento: record.tipoDocumento,
       numeroDocumento: record.numeroDocumento,
       status: RecordStatus.PENDING,
@@ -42,10 +42,12 @@ export class ProgressService {
     }));
 
     await this.save();
-    logger.info('Progress initialized', { jobId: this.jobId, total: records.length });
+    logger.info('Progress initialized in Redis', { jobId: this.jobId, total: records.length });
   }
 
   async updateRecord(index, status, data = {}) {
+    await this.load();
+    
     if (index < 0 || index >= this.progress.records.length) {
       logger.warn('Invalid record index', { index });
       return;
@@ -113,9 +115,15 @@ export class ProgressService {
 
   async save() {
     try {
-      await writeFile(this.progressFile, JSON.stringify(this.progress, null, 2));
+      await connection.set(
+        this.redisKey,
+        JSON.stringify(this.progress),
+        'EX',
+        config.redis.jobProgressTTL
+      );
+      logger.debug('Progress saved to Redis', { jobId: this.jobId, ttl: config.redis.jobProgressTTL });
     } catch (error) {
-      logger.error('Error saving progress', { 
+      logger.error('Error saving progress to Redis', { 
         jobId: this.jobId, 
         error: error.message 
       });
@@ -124,31 +132,23 @@ export class ProgressService {
 
   async load() {
     try {
-      if (!existsSync(this.progressFile)) {
+      const data = await connection.get(this.redisKey);
+      
+      if (!data) {
+        logger.debug('No progress data found in Redis', { jobId: this.jobId });
         return null;
       }
 
-      const data = await readFile(this.progressFile, 'utf-8');
       this.progress = JSON.parse(data);
       
-      logger.info('Progress loaded', { jobId: this.jobId });
+      logger.debug('Progress loaded from Redis', { jobId: this.jobId });
       return this.progress;
     } catch (error) {
-      logger.error('Error loading progress', { 
+      logger.error('Error loading progress from Redis', { 
         jobId: this.jobId, 
         error: error.message 
       });
       return null;
-    }
-  }
-
-  async ensureProgressDir() {
-    try {
-      if (!existsSync(PROGRESS_DIR)) {
-        await mkdir(PROGRESS_DIR, { recursive: true });
-      }
-    } catch (error) {
-      logger.error('Error creating progress directory', { error: error.message });
     }
   }
 
@@ -165,6 +165,24 @@ export class ProgressService {
       skipped: this.progress.skipped,
       pending: this.progress.total - this.progress.processed
     };
+  }
+
+  async delete() {
+    try {
+      const result = await connection.del(this.redisKey);
+      
+      if (result === 1) {
+        logger.info('Progress data deleted from Redis', { jobId: this.jobId });
+      } else {
+        logger.debug('No progress data found to delete in Redis', { jobId: this.jobId });
+      }
+    } catch (error) {
+      logger.error('Error deleting progress data from Redis', { 
+        jobId: this.jobId, 
+        error: error.message 
+      });
+      throw error;
+    }
   }
 }
 

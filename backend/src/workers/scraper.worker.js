@@ -89,7 +89,10 @@ const worker = new Worker(
         if (result.pdfPath) {
           try {
             await unlink(result.pdfPath);
-          } catch (err) {}
+            logger.debug('PDF deleted after cancellation', { pdfPath: result.pdfPath });
+          } catch (err) {
+            logger.warn('Could not delete PDF after cancellation', { error: err.message });
+          }
         }
         throw new Error('Job cancelled by user');
       }

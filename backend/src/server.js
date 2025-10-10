@@ -9,6 +9,7 @@ import { errorHandler } from './middleware/errorHandler.js';
 import uploadRoutes from './routes/upload.js';
 import jobsRoutes from './routes/jobs.js';
 import statsRoutes from './routes/stats.js';
+import historyRoutes from './routes/history.js';
 import { initializeSocketService, getIoInstance } from './services/socketService.js';
 import { initializeEventBus, subscribeToEvents } from './services/eventBus.js';
 
@@ -71,6 +72,7 @@ app.get('/health', (req, res) => {
 app.use('/api/upload', uploadRoutes);
 app.use('/api/jobs', jobsRoutes);
 app.use('/api/stats', statsRoutes);
+app.use('/api/history', historyRoutes);
 
 app.use((req, res) => {
   res.status(404).json({

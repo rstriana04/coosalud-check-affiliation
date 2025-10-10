@@ -133,19 +133,27 @@ export const isJobCancelled = async (jobId) => {
 
 export const obliterateQueue = async () => {
   try {
+    logger.info('Starting queue obliteration...');
+    
     await scraperQueue.pause();
+    logger.debug('Queue paused');
     
     const activeJobs = await scraperQueue.getActive();
+    logger.debug(`Found ${activeJobs.length} active jobs`);
+    
     for (const job of activeJobs) {
       try {
         await job.moveToFailed({ message: 'Job cancelled by user' }, true);
+        logger.debug('Moved active job to failed', { jobId: job.id });
       } catch (err) {
-        logger.warn('Failed to cancel active job', { jobId: job.id });
+        logger.warn('Failed to cancel active job', { jobId: job.id, error: err.message });
       }
     }
     
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
     await scraperQueue.obliterate({ force: true });
-    logger.info('Queue obliterated');
+    logger.info('Queue obliterated successfully');
   } catch (error) {
     logger.error('Error obliterating queue', { error: error.message });
     throw error;

@@ -20,7 +20,11 @@ export default function ProgressBar({ progress }) {
             </div>
           </div>
           
-          <Progress value={percentage} className="h-3" />
+          <Progress value={percentage} className="h-3 relative overflow-hidden">
+            {percentage > 0 && percentage < 100 && (
+              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-shimmer" />
+            )}
+          </Progress>
           
           <div className="flex justify-between items-center mt-2 text-xs text-muted-foreground">
             <span>

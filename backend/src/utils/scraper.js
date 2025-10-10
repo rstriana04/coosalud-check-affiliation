@@ -1,6 +1,6 @@
-import { chromium } from 'playwright';
 import { config } from '../config/config.js';
 import { logger } from './logger.js';
+import { browserPool } from '../services/connectionPool.js';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { mkdirSync } from 'fs';
@@ -11,8 +11,8 @@ const __dirname = dirname(__filename);
 export class CoosaludScraper {
   constructor() {
     this.baseUrl = 'https://portal.coosalud.com/AffiliateManager/GetCertificate';
-    this.maxRetries = 3;
-    this.retryDelayMs = 3000;
+    this.maxRetries = config.processing.maxRetries;
+    this.retryDelayMs = config.scraping.minDelayMs;
     this.browser = null;
     this.context = null;
     this.page = null;
@@ -20,19 +20,17 @@ export class CoosaludScraper {
 
   async initialize() {
     try {
-      logger.debug('Initializing PDF downloader with Playwright');
+      logger.debug('Initializing PDF downloader with browser pool');
       
       const downloadsDir = join(__dirname, '../../downloads');
       mkdirSync(downloadsDir, { recursive: true });
       
-      this.browser = await chromium.launch({
-        headless: config.scraping.headlessMode,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
-      });
+      this.browser = await browserPool.getBrowser();
 
       this.context = await this.browser.newContext({
         acceptDownloads: true,
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        viewport: { width: 1280, height: 720 }
       });
 
       this.page = await this.context.newPage();
@@ -182,8 +180,8 @@ export class CoosaludScraper {
       }
       
       if (this.browser) {
-        await this.browser.close();
-        logger.debug('Browser closed');
+        await browserPool.releaseBrowser(this.browser);
+        logger.debug('Browser returned to pool');
       }
     } catch (error) {
       logger.error('Error closing browser', { error: error.message });
