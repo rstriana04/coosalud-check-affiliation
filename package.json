@@ -1,0 +1,36 @@
+{
+  "name": "adres-automation",
+  "version": "1.0.0",
+  "description": "Full-stack application for automating ADRES affiliation date queries",
+  "type": "module",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\" \"npm run dev:worker\"",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:worker": "sleep 5 && cd backend && node src/workers/scraper.worker.js",
+    "build": "npm run build:frontend && npm run build:backend",
+    "build:frontend": "cd frontend && npm run build",
+    "build:backend": "cd backend && echo 'No build needed'",
+    "start": "cd backend && npm start",
+    "worker": "cd backend && node src/workers/scraper.worker.js",
+    "install:all": "npm install && cd frontend && npm install && cd ../backend && npm install",
+    "redis": "docker-compose up -d redis",
+    "redis:stop": "docker-compose down"
+  },
+  "keywords": [
+    "adres",
+    "automation",
+    "web-scraping",
+    "excel"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
