@@ -12,6 +12,12 @@ class BrowserPool {
   async getBrowser() {
     if (this.pool.length > 0) {
       const browser = this.pool.pop();
+      
+      if (!browser.isConnected()) {
+        logger.warn('Browser from pool is disconnected, creating new one');
+        return this.getBrowser();
+      }
+      
       this.activeConnections++;
       logger.debug('Reusing browser from pool', { 
         poolSize: this.pool.length,

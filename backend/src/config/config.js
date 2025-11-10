@@ -38,6 +38,12 @@ export const config = {
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'application/vnd.ms-excel'
     ]
+  },
+
+  rcbMonthly: {
+    username: process.env.RCB_USERNAME || 'kcastro',
+    password: process.env.RCB_PASSWORD || 'tusalud2025',
+    captchaApiKey: process.env.CAPTCHA_API_KEY || '94033347d8267a35ca8f593b84a61e3e'
   }
 };
 

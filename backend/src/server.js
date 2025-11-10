@@ -10,6 +10,7 @@ import uploadRoutes from './routes/upload.js';
 import jobsRoutes from './routes/jobs.js';
 import statsRoutes from './routes/stats.js';
 import historyRoutes from './routes/history.js';
+import rcbMonthlyRoutes from './routes/rcbMonthly.js';
 import { initializeSocketService, getIoInstance } from './services/socketService.js';
 import { initializeEventBus, subscribeToEvents } from './services/eventBus.js';
 
@@ -73,6 +74,7 @@ app.use('/api/upload', uploadRoutes);
 app.use('/api/jobs', jobsRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/history', historyRoutes);
+app.use('/api/rcb-monthly', rcbMonthlyRoutes);
 
 app.use((req, res) => {
   res.status(404).json({
