@@ -1,10 +1,15 @@
 import { config } from '../config/config.js';
 import { logger } from '../utils/logger.js';
 import { firefox } from 'playwright';
-import { join, dirname } from 'path';
+import { join, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
 import { mkdirSync } from 'fs';
 import Captcha from '2captcha';
+import { filterExcelByEspecialidad } from '../utils/excelFilterService.js';
+import { extractPatientDataFromPDF } from '../utils/pdfProcessor.js';
+import { generatePatientExcel } from '../utils/excelGenerator.js';
+import archiver from 'archiver';
+import { createWriteStream } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -29,7 +34,7 @@ export class RCBMonthlyScraper {
       
       logger.debug('Launching dedicated browser for RCB Monthly');
       this.browser = await firefox.launch({
-        headless: false,
+        headless: true,
         args: []
       });
 
@@ -206,32 +211,26 @@ export class RCBMonthlyScraper {
       logger.debug('Waiting for iframe to load');
       await this.page.waitForTimeout(2000);
 
-      // Find the iframe - try common selectors
-      const iframeElement = await this.page.waitForSelector('iframe[name="contenido"], iframe#contenido, iframe.iframe', { timeout: 10000 });
+      // Get frame using page.frame() method (official Playwright approach)
+      let frame = this.page.frame({ name: 'contenido' });
       
-      if (!iframeElement) {
-        // Log all iframes on the page for debugging
-        const iframes = await this.page.$$('iframe');
-        logger.debug('Found iframes', { count: iframes.length });
-        
-        for (let i = 0; i < iframes.length; i++) {
-          const name = await iframes[i].getAttribute('name');
-          const id = await iframes[i].getAttribute('id');
-          const src = await iframes[i].getAttribute('src');
-          logger.debug(`Iframe ${i}`, { name, id, src });
-        }
-        
+      if (!frame) {
+        // Fallback: try by URL pattern
+        frame = this.page.frame({ url: /reporteatencionesxmes\.php/ });
+      }
+      
+      if (!frame) {
+        const frames = this.page.frames();
+        logger.error('Frame not found', { 
+          availableFrames: frames.map(f => ({ name: f.name(), url: f.url() }))
+        });
         throw new Error('Could not find content iframe');
       }
 
-      // Get the iframe's content frame
-      const frame = await iframeElement.contentFrame();
-      
-      if (!frame) {
-        throw new Error('Could not access iframe content');
-      }
-
-      logger.debug('Successfully accessed iframe content');
+      logger.debug('Successfully accessed iframe content', { 
+        frameName: frame.name(), 
+        frameUrl: frame.url() 
+      });
 
       // Now interact with elements inside the iframe
       await frame.waitForSelector('#txtfecini', { timeout: 10000 });
@@ -295,12 +294,21 @@ export class RCBMonthlyScraper {
       const downloadsDir = join(__dirname, '../../downloads');
       const downloadPath = join(downloadsDir, `rcb-monthly-${Date.now()}.xls`);
 
-      // Get the iframe again for export button
-      const iframeElement = await this.page.waitForSelector('iframe[name="contenido"], iframe#contenido, iframe.iframe', { timeout: 10000 });
-      const frame = await iframeElement.contentFrame();
+      // Get frame using page.frame() method
+      await this.page.waitForTimeout(1000);
+      
+      let frame = this.page.frame({ name: 'contenido' });
       
       if (!frame) {
-        throw new Error('Could not access iframe content for download');
+        frame = this.page.frame({ url: /reporteatencionesxmes\.php/ });
+      }
+      
+      if (!frame) {
+        const frames = this.page.frames();
+        logger.error('Frame not found for download', { 
+          availableFrames: frames.map(f => ({ name: f.name(), url: f.url() }))
+        });
+        throw new Error('Could not find iframe for download');
       }
 
       logger.debug('Waiting for export button in iframe');
@@ -356,6 +364,433 @@ export class RCBMonthlyScraper {
     }
   }
 
+  async navigateToPatientHistory() {
+    try {
+      logger.debug('Navigating to patient history section');
+
+      await this.page.click('#menu2 > nav > div > ul > li:nth-child(6)');
+      await this.page.waitForTimeout(1000);
+
+      await this.page.click('#menu2 > nav > div > ul > li.m-a-.contains-items.items-expanded > ul > li.sm-a-86 > a');
+      await this.page.waitForTimeout(2000);
+
+      logger.info('Successfully navigated to patient history section');
+    } catch (error) {
+      logger.error('Failed to navigate to patient history', { error: error.message });
+      throw error;
+    }
+  }
+
+  async searchPatient(documentNumber) {
+    try {
+      logger.debug('Searching for patient', { documentNumber });
+
+      await this.page.waitForTimeout(2000);
+
+      // Get frame using page.frame() method
+      let frame = this.page.frame({ name: 'contenido' });
+      
+      if (!frame) {
+        frame = this.page.frame({ url: /consultahistoriaclinica\.php/ });
+      }
+
+      if (!frame) {
+        const frames = this.page.frames();
+        logger.error('Frame not found', { 
+          availableFrames: frames.map(f => ({ name: f.name(), url: f.url() }))
+        });
+        throw new Error('Could not find iframe for patient search');
+      }
+
+      logger.debug('Found frame', { frameName: frame.name(), frameUrl: frame.url() });
+
+      await frame.waitForSelector('#txt1pacienteno', { timeout: 10000 });
+      
+      await frame.fill('#txt1pacienteno', '');
+      await this.page.waitForTimeout(500);
+
+      await frame.type('#txt1pacienteno', String(documentNumber), { delay: 100 });
+      
+      logger.debug('Waiting for autocomplete dropdown to appear');
+      await this.page.waitForTimeout(2000);
+
+      const autocompleteClicked = await frame.evaluate((docNumber) => {
+        const autocompleteSelectors = [
+          '.ui-autocomplete',
+          '.ui-menu',
+          'ul.ui-autocomplete',
+          '[role="listbox"]',
+          '.autocomplete-suggestions'
+        ];
+
+        for (const selector of autocompleteSelectors) {
+          const autocompleteList = document.querySelector(selector);
+          if (autocompleteList && autocompleteList.style.display !== 'none') {
+            const items = autocompleteList.querySelectorAll('li, .ui-menu-item, [role="option"]');
+            
+            for (const item of items) {
+              const itemText = item.textContent || item.innerText;
+              if (itemText.includes(docNumber)) {
+                item.click();
+                console.log('Clicked autocomplete item:', itemText);
+                return true;
+              }
+            }
+          }
+        }
+        
+        return false;
+      }, String(documentNumber));
+
+      if (autocompleteClicked) {
+        logger.info('Autocomplete item clicked successfully');
+        await this.page.waitForTimeout(1500);
+      } else {
+        logger.warn('Autocomplete item not found, trying keyboard selection');
+        
+        await frame.press('#txt1pacienteno', 'ArrowDown');
+        await this.page.waitForTimeout(300);
+        await frame.press('#txt1pacienteno', 'Enter');
+        await this.page.waitForTimeout(1500);
+      }
+
+      const patientId = await frame.evaluate(() => {
+        const hiddenInput = document.querySelector('#hid2codpacientesi');
+        return hiddenInput ? hiddenInput.value : null;
+      });
+
+      if (!patientId) {
+        throw new Error(`Patient ID not populated after autocomplete selection for document: ${documentNumber}`);
+      }
+
+      logger.info('Patient selected from autocomplete', { documentNumber, patientId });
+
+      return patientId;
+    } catch (error) {
+      logger.error('Failed to search patient', { documentNumber, error: error.message });
+      throw error;
+    }
+  }
+
+  async fillPatientId(patientId) {
+    try {
+      logger.debug('Filling patient ID', { patientId });
+
+      const iframeElement = await this.page.waitForSelector('iframe[name="contenido"], iframe#contenido, iframe.iframe', { timeout: 10000 });
+      const frame = await iframeElement.contentFrame();
+
+      if (!frame) {
+        throw new Error('Could not access iframe content for filling patient ID');
+      }
+
+      await frame.evaluate((id) => {
+        const input = document.querySelector('#hid2codpacientesi');
+        if (input) {
+          input.value = id;
+          input.setAttribute('value', id);
+        } else {
+          throw new Error('Patient ID input not found');
+        }
+      }, String(patientId));
+
+      await this.page.waitForTimeout(500);
+
+      const verifyValue = await frame.evaluate(() => {
+        const input = document.querySelector('#hid2codpacientesi');
+        return input ? {
+          value: input.value,
+          attribute: input.getAttribute('value')
+        } : null;
+      });
+
+      logger.debug('Patient ID filled and verified', { 
+        patientId, 
+        verifyValue 
+      });
+    } catch (error) {
+      logger.error('Failed to fill patient ID', { patientId, error: error.message });
+      throw error;
+    }
+  }
+
+  async filterAndExtractCodCita(fechaAtencion) {
+    try {
+      logger.debug('Filtering and extracting CodCita', { fechaAtencion });
+
+      await this.page.waitForTimeout(1000);
+
+      // Get frame using page.frame() method
+      let frame = this.page.frame({ name: 'contenido' });
+      
+      if (!frame) {
+        frame = this.page.frame({ url: /consultahistoriaclinica\.php/ });
+      }
+
+      if (!frame) {
+        const frames = this.page.frames();
+        logger.error('Frame not found for filtering', { 
+          availableFrames: frames.map(f => ({ name: f.name(), url: f.url() }))
+        });
+        throw new Error('Could not find iframe for filtering');
+      }
+
+      await frame.waitForSelector('#filtrar', { state: 'attached', timeout: 10000 });
+
+      try {
+        await frame.evaluate(() => {
+          const filterButton = document.querySelector('#filtrar');
+          if (filterButton) {
+            filterButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        });
+
+        await this.page.waitForTimeout(1000);
+        await frame.click('#filtrar', { timeout: 5000 });
+      } catch (clickError) {
+        await frame.evaluate(() => {
+          const filterButton = document.querySelector('#filtrar');
+          if (filterButton) {
+            filterButton.click();
+          }
+        });
+      }
+
+      await this.page.waitForTimeout(3000);
+
+      const codCita = await frame.evaluate((targetDate) => {
+        const tbody = document.querySelector('#form1 > table > tbody > tr:nth-child(4) > td:nth-child(2) > table > tbody');
+        
+        if (!tbody) {
+          console.log('Tbody not found with selector');
+          return null;
+        }
+
+        const rows = tbody.querySelectorAll('tr');
+        console.log(`Found ${rows.length} rows in tbody`);
+        
+        for (let i = 0; i < rows.length; i++) {
+          const row = rows[i];
+          const cells = row.querySelectorAll('td');
+          
+          if (cells.length === 0) continue;
+          
+          for (let j = 0; j < cells.length; j++) {
+            const cellText = cells[j].textContent.trim();
+            
+            if (cellText.startsWith(targetDate)) {
+              const codCitaCell = cells[0];
+              const codCita = codCitaCell ? codCitaCell.textContent.trim() : null;
+              console.log(`Found matching row: CodCita=${codCita}, FechaAtencion=${cellText}`);
+              return codCita;
+            }
+          }
+        }
+        
+        console.log(`No matching row found for date: ${targetDate}`);
+        return null;
+      }, fechaAtencion);
+
+      if (!codCita) {
+        logger.warn('CodCita not found for date', { fechaAtencion });
+        return null;
+      }
+
+      logger.info('CodCita extracted successfully', { fechaAtencion, codCita });
+      return codCita;
+    } catch (error) {
+      logger.error('Failed to extract CodCita', { fechaAtencion, error: error.message });
+      throw error;
+    }
+  }
+
+  async downloadPatientPDF(codCita, patientId, documentNumber, fechaAtencion) {
+    try {
+      const pdfUrl = `https://tusaludennuestrasmanos.macaw.com.co/administrador/componentes/ajax_php/imprime/imprimePaginaHistoria_convert.php?codcita=${codCita}&codpaciente=${patientId}`;
+      
+      logger.info('Downloading patient PDF', { 
+        codCita, 
+        patientId, 
+        documentNumber,
+        pdfUrl 
+      });
+      
+      console.log(`\n📥 Downloading PDF for patient ${documentNumber}`);
+      console.log(`   URL: ${pdfUrl}`);
+
+      const pdfDir = join(__dirname, '../../pdfs');
+      mkdirSync(pdfDir, { recursive: true });
+
+      const fechaFormatted = fechaAtencion.replace(/-/g, '');
+      const pdfFileName = `CC_${documentNumber}_HISTORIA CLINICA_${fechaFormatted}.pdf`;
+      const pdfPath = join(pdfDir, pdfFileName);
+
+      const downloadPromise = this.page.waitForEvent('download', { timeout: 60000 });
+
+      await this.page.evaluate((url) => {
+        window.open(url, '_blank');
+      }, pdfUrl);
+
+      const download = await downloadPromise;
+
+      await download.saveAs(pdfPath);
+
+      logger.info('PDF downloaded successfully', { pdfPath, documentNumber });
+      console.log(`   ✅ Saved to: ${pdfPath}\n`);
+
+      return pdfPath;
+    } catch (error) {
+      logger.error('Failed to download patient PDF', { 
+        codCita, 
+        patientId, 
+        documentNumber,
+        error: error.message 
+      });
+      throw error;
+    }
+  }
+
+  async createZipArchive(pdfFiles, excelFile, outputPath) {
+    try {
+      logger.info('Creating ZIP archive', { 
+        pdfCount: pdfFiles.length,
+        excelFile,
+        outputPath 
+      });
+
+      return new Promise((resolve, reject) => {
+        const output = createWriteStream(outputPath);
+        const archive = archiver('zip', {
+          zlib: { level: 9 }
+        });
+
+        output.on('close', () => {
+          logger.info('ZIP archive created successfully', { 
+            outputPath,
+            totalBytes: archive.pointer()
+          });
+          resolve(outputPath);
+        });
+
+        archive.on('error', (err) => {
+          logger.error('Error creating ZIP archive', { error: err.message });
+          reject(err);
+        });
+
+        archive.pipe(output);
+
+        pdfFiles.forEach(pdfPath => {
+          const fileName = basename(pdfPath);
+          archive.file(pdfPath, { name: fileName });
+        });
+
+        if (excelFile) {
+          const excelFileName = basename(excelFile);
+          archive.file(excelFile, { name: excelFileName });
+        }
+
+        archive.finalize();
+      });
+    } catch (error) {
+      logger.error('Failed to create ZIP archive', { error: error.message });
+      throw error;
+    }
+  }
+
+  async processPatientRecords(filteredData) {
+    try {
+      logger.info('Starting patient records processing', { totalRecords: filteredData.length - 1 });
+
+      const results = [];
+      const pdfFiles = [];
+      const patientDataArray = [];
+      const dataRows = filteredData.slice(1);
+
+      for (let i = 0; i < dataRows.length; i++) {
+        const record = dataRows[i];
+        const documentNumber = record.B;
+        const fechaAtencion = record.G;
+
+        logger.info(`Processing record ${i + 1}/${dataRows.length}`, { documentNumber, fechaAtencion });
+
+        try {
+          await this.navigateToPatientHistory();
+
+          const patientId = await this.searchPatient(documentNumber);
+
+          const codCita = await this.filterAndExtractCodCita(fechaAtencion);
+
+          if (!codCita) {
+            throw new Error('CodCita not found');
+          }
+
+          const pdfPath = await this.downloadPatientPDF(codCita, patientId, documentNumber, fechaAtencion);
+          pdfFiles.push(pdfPath);
+
+          const patientData = await extractPatientDataFromPDF(pdfPath);
+          patientDataArray.push(patientData);
+
+          results.push({
+            rowNumber: record._rowNumber,
+            documentNumber,
+            fechaAtencion,
+            patientId,
+            codCita,
+            pdfPath,
+            status: 'success'
+          });
+
+          logger.info(`Record processed successfully`, { documentNumber, codCita });
+        } catch (error) {
+          logger.error(`Failed to process record`, { documentNumber, error: error.message });
+          
+          results.push({
+            rowNumber: record._rowNumber,
+            documentNumber,
+            fechaAtencion,
+            patientId: null,
+            codCita: null,
+            pdfPath: null,
+            status: 'failed',
+            error: error.message
+          });
+        }
+
+        await this.page.waitForTimeout(1000);
+      }
+
+      logger.info('Patient records processing completed', { 
+        total: dataRows.length,
+        successful: results.filter(r => r.status === 'success').length,
+        failed: results.filter(r => r.status === 'failed').length
+      });
+
+      const processedDir = join(__dirname, '../../processed');
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const excelFileName = `pacientes-${timestamp}.xlsx`;
+      const excelPath = join(processedDir, excelFileName);
+
+      let excelFilePath = null;
+      if (patientDataArray.length > 0) {
+        excelFilePath = await generatePatientExcel(patientDataArray, excelPath);
+        logger.info('Excel file generated', { excelFilePath, patientCount: patientDataArray.length });
+      }
+
+      const zipFileName = `historias-clinicas-${timestamp}.zip`;
+      const zipPath = join(processedDir, zipFileName);
+      const zipFilePath = await this.createZipArchive(pdfFiles, excelFilePath, zipPath);
+
+      return {
+        results,
+        excelFilePath,
+        zipFilePath,
+        pdfFiles
+      };
+    } catch (error) {
+      logger.error('Failed to process patient records', { error: error.message });
+      throw error;
+    }
+  }
+
   async generateReport(startDate, endDate) {
     try {
       logger.info('Starting RCB Monthly report generation', { startDate, endDate });
@@ -364,11 +799,35 @@ export class RCBMonthlyScraper {
       await this.login();
       await this.navigateToReportSection();
       await this.setDateFilters(startDate, endDate);
-      const filePath = await this.downloadReport();
+      const excelFilePath = await this.downloadReport();
 
-      logger.info('RCB Monthly report generated successfully', { filePath });
+      logger.info('RCB Monthly report downloaded successfully', { excelFilePath });
 
-      return filePath;
+      const processedDir = join(__dirname, '../../processed');
+      mkdirSync(processedDir, { recursive: true });
+
+      logger.info('Filtering Excel data by especialidad and diagnostico');
+      const filterResult = await filterExcelByEspecialidad(excelFilePath, processedDir);
+
+      logger.info('RCB Monthly report generated and filtered successfully', { 
+        excelFilePath,
+        jsonFilePath: filterResult.jsonPath,
+        totalFilteredRows: filterResult.totalRows
+      });
+
+      logger.info('Starting patient records processing workflow');
+      const processingResults = await this.processPatientRecords(filterResult.filteredData);
+
+      return {
+        excelFilePath,
+        jsonFilePath: filterResult.jsonPath,
+        totalRows: filterResult.totalRows,
+        filteredData: filterResult.filteredData,
+        processingResults: processingResults.results,
+        patientExcelFile: processingResults.excelFilePath,
+        zipFilePath: processingResults.zipFilePath,
+        pdfFiles: processingResults.pdfFiles
+      };
     } catch (error) {
       logger.error('Failed to generate RCB Monthly report', { error: error.message });
       throw error;
