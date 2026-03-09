@@ -8,6 +8,8 @@ import Captcha from '2captcha';
 import { filterExcelByEspecialidad } from '../utils/excelFilterService.js';
 import { extractPatientDataFromPDF } from '../utils/pdfProcessor.js';
 import { generatePatientExcel } from '../utils/excelGenerator.js';
+import { extractRCVDataFromPDF } from '../utils/medicalRecordExtractor.js';
+import { generateRCVExcel } from '../utils/rcvExcelGenerator.js';
 import archiver from 'archiver';
 import { createWriteStream } from 'fs';
 
@@ -557,41 +559,91 @@ export class RCBMonthlyScraper {
 
       await this.page.waitForTimeout(3000);
 
-      const codCita = await frame.evaluate((targetDate) => {
-        const tbody = document.querySelector('#form1 > table > tbody > tr:nth-child(4) > td:nth-child(2) > table > tbody');
-        
-        if (!tbody) {
-          console.log('Tbody not found with selector');
+      const result = await frame.evaluate((targetDate) => {
+        function extractDateParts(text) {
+          const isoMatch = text.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+          if (isoMatch) return { y: isoMatch[1], m: isoMatch[2].padStart(2, '0'), d: isoMatch[3].padStart(2, '0') };
+
+          const dmyMatch = text.match(/(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+          if (dmyMatch) return { y: dmyMatch[3], m: dmyMatch[2].padStart(2, '0'), d: dmyMatch[1].padStart(2, '0') };
+
           return null;
         }
 
+        const targetParts = extractDateParts(targetDate);
+        if (!targetParts) return { codCita: null, debug: { error: 'Could not parse targetDate', targetDate } };
+
+        const tbody = document.querySelector('#form1 > table > tbody > tr:nth-child(4) > td:nth-child(2) > table > tbody');
+
+        if (!tbody) {
+          const allTbodies = document.querySelectorAll('tbody');
+          const tables = document.querySelectorAll('table');
+          return {
+            codCita: null,
+            debug: {
+              error: 'Tbody not found with primary selector',
+              totalTables: tables.length,
+              totalTbodies: allTbodies.length,
+              bodySnippet: document.body?.innerHTML?.substring(0, 500) || 'empty'
+            }
+          };
+        }
+
         const rows = tbody.querySelectorAll('tr');
-        console.log(`Found ${rows.length} rows in tbody`);
-        
+        const sampleCells = [];
+
+        for (let i = 0; i < rows.length && i < 5; i++) {
+          const cells = rows[i].querySelectorAll('td');
+          const rowTexts = [];
+          for (let j = 0; j < cells.length; j++) {
+            rowTexts.push(cells[j].textContent.trim());
+          }
+          sampleCells.push(rowTexts);
+        }
+
         for (let i = 0; i < rows.length; i++) {
-          const row = rows[i];
-          const cells = row.querySelectorAll('td');
-          
+          const cells = rows[i].querySelectorAll('td');
           if (cells.length === 0) continue;
-          
+
           for (let j = 0; j < cells.length; j++) {
             const cellText = cells[j].textContent.trim();
-            
-            if (cellText.startsWith(targetDate)) {
-              const codCitaCell = cells[0];
-              const codCita = codCitaCell ? codCitaCell.textContent.trim() : null;
-              console.log(`Found matching row: CodCita=${codCita}, FechaAtencion=${cellText}`);
-              return codCita;
+            const cellParts = extractDateParts(cellText);
+
+            if (cellParts && cellParts.y === targetParts.y && cellParts.m === targetParts.m && cellParts.d === targetParts.d) {
+              const codCita = cells[0]?.textContent.trim() || null;
+              return { codCita, debug: { matched: true, cellText, row: i, col: j } };
             }
           }
         }
-        
-        console.log(`No matching row found for date: ${targetDate}`);
-        return null;
+
+        return {
+          codCita: null,
+          debug: {
+            error: 'No matching date found',
+            targetDate,
+            targetParts,
+            totalRows: rows.length,
+            sampleCells
+          }
+        };
       }, fechaAtencion);
 
+      if (result.debug) {
+        logger.debug('filterAndExtractCodCita debug', result.debug);
+      }
+
+      const codCita = result.codCita;
+
       if (!codCita) {
-        logger.warn('CodCita not found for date', { fechaAtencion });
+        try {
+          const screenshotDir = join(__dirname, '../../logs');
+          mkdirSync(screenshotDir, { recursive: true });
+          const ssPath = join(screenshotDir, `codcita-debug-${Date.now()}.png`);
+          await this.page.screenshot({ path: ssPath, fullPage: true });
+          logger.warn('CodCita not found - screenshot saved', { fechaAtencion, ssPath });
+        } catch (ssErr) {
+          logger.warn('CodCita not found (screenshot failed)', { fechaAtencion });
+        }
         return null;
       }
 
@@ -649,7 +701,7 @@ export class RCBMonthlyScraper {
     }
   }
 
-  async createZipArchive(pdfFiles, excelFile, outputPath) {
+  async createZipArchive(pdfFiles, excelFile, outputPath, additionalFiles = []) {
     try {
       logger.info('Creating ZIP archive', { 
         pdfCount: pdfFiles.length,
@@ -688,6 +740,14 @@ export class RCBMonthlyScraper {
           archive.file(excelFile, { name: excelFileName });
         }
 
+        // Add additional files (e.g., RCV Excel)
+        additionalFiles.forEach(filePath => {
+          if (filePath) {
+            const fileName = basename(filePath);
+            archive.file(filePath, { name: fileName });
+          }
+        });
+
         archive.finalize();
       });
     } catch (error) {
@@ -703,6 +763,7 @@ export class RCBMonthlyScraper {
       const results = [];
       const pdfFiles = [];
       const patientDataArray = [];
+      const rcvDataArray = [];
       const dataRows = filteredData.slice(1);
 
       for (let i = 0; i < dataRows.length; i++) {
@@ -726,8 +787,13 @@ export class RCBMonthlyScraper {
           const pdfPath = await this.downloadPatientPDF(codCita, patientId, documentNumber, fechaAtencion);
           pdfFiles.push(pdfPath);
 
+          // Extract basic patient data (for backward compatibility)
           const patientData = await extractPatientDataFromPDF(pdfPath);
           patientDataArray.push(patientData);
+
+          // Extract RCV format data (with LLM support if configured)
+          const rcvData = await extractRCVDataFromPDF(pdfPath, fechaAtencion);
+          rcvDataArray.push(rcvData);
 
           results.push({
             rowNumber: record._rowNumber,
@@ -766,24 +832,46 @@ export class RCBMonthlyScraper {
 
       const processedDir = join(__dirname, '../../processed');
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      
+      // Generate basic patient Excel (backward compatibility)
       const excelFileName = `pacientes-${timestamp}.xlsx`;
       const excelPath = join(processedDir, excelFileName);
-
       let excelFilePath = null;
       if (patientDataArray.length > 0) {
         excelFilePath = await generatePatientExcel(patientDataArray, excelPath);
         logger.info('Excel file generated', { excelFilePath, patientCount: patientDataArray.length });
       }
 
+      // Generate RCV format Excel
+      const rcvExcelFileName = `rcv-format-${timestamp}.xlsx`;
+      const rcvExcelPath = join(processedDir, rcvExcelFileName);
+      let rcvExcelFilePath = null;
+      if (rcvDataArray.length > 0) {
+        rcvExcelFilePath = await generateRCVExcel(rcvDataArray, rcvExcelPath);
+        logger.info('RCV Excel file generated', { rcvExcelFilePath, recordCount: rcvDataArray.length });
+      }
+
       const zipFileName = `historias-clinicas-${timestamp}.zip`;
       const zipPath = join(processedDir, zipFileName);
-      const zipFilePath = await this.createZipArchive(pdfFiles, excelFilePath, zipPath);
+      // Include both Excel files in ZIP
+      const additionalFiles = [];
+      if (rcvExcelFilePath && excelFilePath) {
+        additionalFiles.push(excelFilePath); // Include basic Excel if RCV exists
+      }
+      const zipFilePath = await this.createZipArchive(
+        pdfFiles, 
+        rcvExcelFilePath || excelFilePath, 
+        zipPath,
+        additionalFiles
+      );
 
       return {
         results,
         excelFilePath,
+        rcvExcelFilePath,
         zipFilePath,
-        pdfFiles
+        pdfFiles,
+        processingResults: results
       };
     } catch (error) {
       logger.error('Failed to process patient records', { error: error.message });

@@ -44,6 +44,23 @@ export const config = {
     username: process.env.RCB_USERNAME || 'kcastro',
     password: process.env.RCB_PASSWORD || 'tusalud2025',
     captchaApiKey: process.env.CAPTCHA_API_KEY || '94033347d8267a35ca8f593b84a61e3e'
+  },
+
+  llm: {
+    useLLM: process.env.USE_LLM_EXTRACTION === 'true',
+    provider: process.env.LLM_PROVIDER || 'ollama',
+    openaiApiKey: process.env.OPENAI_API_KEY || '',
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
+    ollamaUrl: process.env.OLLAMA_URL || 'http://localhost:11434',
+    ollamaModel: process.env.OLLAMA_MODEL || 'llama3.1:8b',
+    customLlmUrl: process.env.CUSTOM_LLM_URL || '',
+    customLlmApiKey: process.env.CUSTOM_LLM_API_KEY || '',
+    customLlmModel: process.env.CUSTOM_LLM_MODEL || ''
+  },
+
+  email: {
+    apiKey: process.env.RESEND_API_KEY || '',
+    from: process.env.EMAIL_FROM || 'ADRES Automation <noreply@resend.dev>'
   }
 };
 

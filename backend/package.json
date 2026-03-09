@@ -7,7 +7,10 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "worker": "node src/workers/scraper.worker.js"
+    "worker": "node src/workers/scraper.worker.js",
+    "prepare-fine-tuning": "node src/scripts/prepareFineTuning.js",
+    "extract-pdfs": "node src/scripts/extractPdfs.js",
+    "fine-tune": "node src/scripts/fineTuneModel.js"
   },
   "dependencies": {
     "2captcha": "^3.0.5-2",
@@ -22,6 +25,7 @@
     "multer": "^1.4.5-lts.1",
     "pdf2json": "^4.0.0",
     "playwright": "1.40.1",
+    "resend": "^4.8.0",
     "socket.io": "^4.7.2",
     "uuid": "^9.0.1",
     "winston": "^3.11.0",
