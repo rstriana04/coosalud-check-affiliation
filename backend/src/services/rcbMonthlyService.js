@@ -953,7 +953,6 @@ export class RCBMonthlyScraper {
       return {
         results,
         excelFilePath,
-        rcvExcelFilePath,
         zipFilePath,
         pdfFiles,
         processingResults: results
