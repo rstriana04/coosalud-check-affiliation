@@ -231,6 +231,12 @@ export default function SeguimientoGestantesReportTab() {
             seguimiento-gestantes. Nota: fecha_atencion corresponde a ULTIMA CITA DE
             CONTROL (formatos: YYYY-MM-DD o DD-MM-YYYY).
           </CardDescription>
+          <a
+            href={api.getTemplateDownloadUrl('seguimiento-gestantes')}
+            className="inline-flex items-center gap-1 mt-1 text-xs text-primary hover:underline font-medium"
+          >
+            <Download className="w-3 h-3" /> Descargar plantilla de ejemplo
+          </a>
         </CardHeader>
         <CardContent className="space-y-4">
           {!isProcessing && !result && (

@@ -230,6 +230,12 @@ export default function LifecycleReportTab() {
             identipac, fecha_atencion, nombremedico. La columna programa debe tener:
             juventud, adultez o vejez.
           </CardDescription>
+          <a
+            href={api.getTemplateDownloadUrl('lifecycle')}
+            className="inline-flex items-center gap-1 mt-1 text-xs text-primary hover:underline font-medium"
+          >
+            <Download className="w-3 h-3" /> Descargar plantilla de ejemplo
+          </a>
         </CardHeader>
         <CardContent className="space-y-4">
           {!isProcessing && !result && (

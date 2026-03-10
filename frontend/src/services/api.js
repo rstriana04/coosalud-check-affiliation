@@ -61,6 +61,10 @@ export const deleteJob = async (jobId) => {
   return response.data;
 };
 
+export const getTemplateDownloadUrl = (module) => {
+  return `${API_URL}/api/rcb-monthly/template/${module}`;
+};
+
 export const generateRCBMonthlyReport = async (startDate, endDate) => {
   const response = await api.post('/rcb-monthly/generate', {
     startDate,

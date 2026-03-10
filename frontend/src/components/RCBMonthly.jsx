@@ -306,6 +306,12 @@ function RCVReportTab() {
             Sube un archivo Excel con los pacientes a procesar. Columnas requeridas:
             identipac, fecha_atencion, nombremedico. Opcional: programa.
           </CardDescription>
+          <a
+            href={api.getTemplateDownloadUrl('rcv')}
+            className="inline-flex items-center gap-1 mt-1 text-xs text-primary hover:underline font-medium"
+          >
+            <Download className="w-3 h-3" /> Descargar plantilla de ejemplo
+          </a>
         </CardHeader>
         <CardContent className="space-y-4">
           {!isProcessing && !result && (

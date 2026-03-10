@@ -1,5 +1,6 @@
 import express from 'express';
 import multer from 'multer';
+import ExcelJS from 'exceljs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { mkdirSync, createReadStream, statSync } from 'fs';
@@ -38,6 +39,85 @@ const upload = multer({
 
 const router = express.Router();
 const activeJobs = new Map();
+
+const TEMPLATES = {
+  rcv: {
+    filename: 'plantilla-riesgo-cardiovascular.xlsx',
+    rows: [
+      ['1112345678', '2026-01-15', 'JUAN PEREZ', 'riesgo-cardiovascular'],
+      ['31425149', '2026-02-20', 'MARIA LOPEZ', 'riesgo-cardiovascular'],
+    ]
+  },
+  pediatric: {
+    filename: 'plantilla-pediatrico.xlsx',
+    rows: [
+      ['1098765432', '2026-01-10', 'CARLOS GARCIA', 'primera-infancia'],
+      ['1087654321', '2026-02-15', 'ANA MARTINEZ', 'infancia'],
+      ['1076543210', '2026-03-05', 'PEDRO SANCHEZ', 'adolescencia'],
+    ]
+  },
+  lifecycle: {
+    filename: 'plantilla-ciclo-de-vida.xlsx',
+    rows: [
+      ['1112345678', '2026-01-20', 'LAURA GOMEZ', 'juventud'],
+      ['31425149', '2026-02-10', 'ROBERTO SILVA', 'adultez'],
+      ['15432198', '2026-03-01', 'DIANA CASTRO', 'vejez'],
+    ]
+  },
+  'planificacion-familiar': {
+    filename: 'plantilla-planificacion-familiar.xlsx',
+    rows: [
+      ['31425149', '2026-01-25', 'EDNA UPEGUI', 'planificacion-familiar'],
+      ['1112794611', '2026-02-15', 'CAROLINA MOLANO', 'planificacion-familiar'],
+    ]
+  },
+  citologias: {
+    filename: 'plantilla-citologias.xlsx',
+    rows: [
+      ['31425149', '2026-01-18', 'EDNA UPEGUI', 'citologias'],
+      ['1112794611', '2026-02-22', 'CAROLINA MOLANO', 'citologias'],
+    ]
+  },
+  'seguimiento-gestantes': {
+    filename: 'plantilla-seguimiento-gestantes.xlsx',
+    rows: [
+      ['1112794611', '2026-01-28', 'EDNA UPEGUI', 'seguimiento-gestantes'],
+      ['31425149', '28-01-2026', 'CAROLINA MOLANO', 'seguimiento-gestantes'],
+    ]
+  },
+};
+
+router.get('/template/:module', async (req, res, next) => {
+  try {
+    const template = TEMPLATES[req.params.module];
+    if (!template) throw new AppError('Plantilla no encontrada', 404);
+
+    const workbook = new ExcelJS.Workbook();
+    const ws = workbook.addWorksheet('Plantilla');
+
+    ws.columns = [
+      { header: 'identipac', key: 'identipac', width: 15 },
+      { header: 'fecha_atencion', key: 'fecha_atencion', width: 18 },
+      { header: 'nombremedico', key: 'nombremedico', width: 25 },
+      { header: 'programa', key: 'programa', width: 30 },
+    ];
+
+    const headerRow = ws.getRow(1);
+    headerRow.font = { bold: true };
+    headerRow.alignment = { horizontal: 'center' };
+
+    for (const row of template.rows) {
+      ws.addRow(row);
+    }
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${template.filename}"`);
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    next(error);
+  }
+});
 
 router.post('/generate', async (req, res, next) => {
   try {
