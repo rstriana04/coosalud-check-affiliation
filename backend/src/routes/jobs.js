@@ -11,6 +11,7 @@ import { logger } from '../utils/logger.js';
 import { NotFoundError, AppError } from '../middleware/errorHandler.js';
 import { validate, jobIdSchema, startJobSchema } from '../middleware/validator.js';
 import { emitLog, emitJobPaused, emitJobCancelled } from '../services/socketService.js';
+import { RetryService } from '../services/retryService.js';
 import { JobStatus, RecordStatus } from '../../../shared/types.js';
 
 const router = express.Router();
