@@ -8,8 +8,6 @@ import Captcha from '2captcha';
 import { filterExcelByEspecialidad } from '../utils/excelFilterService.js';
 import { extractPatientDataFromPDF } from '../utils/pdfProcessor.js';
 import { generatePatientExcel } from '../utils/excelGenerator.js';
-import { extractRCVDataFromPDF } from '../utils/medicalRecordExtractor.js';
-import { generateRCVExcel } from '../utils/rcvExcelGenerator.js';
 import archiver from 'archiver';
 import { createWriteStream } from 'fs';
 
@@ -871,7 +869,6 @@ export class RCBMonthlyScraper {
       const results = [];
       const pdfFiles = [];
       const patientDataArray = [];
-      const rcvDataArray = [];
       const dataRows = filteredData.slice(1);
 
       for (let i = 0; i < dataRows.length; i++) {
@@ -895,13 +892,8 @@ export class RCBMonthlyScraper {
           const pdfPath = await this.downloadPatientPDF(codCita, patientId, documentNumber, fechaAtencion);
           pdfFiles.push(pdfPath);
 
-          // Extract basic patient data (for backward compatibility)
           const patientData = await extractPatientDataFromPDF(pdfPath);
           patientDataArray.push(patientData);
-
-          // Extract RCV format data (with LLM support if configured)
-          const rcvData = await extractRCVDataFromPDF(pdfPath, fechaAtencion);
-          rcvDataArray.push(rcvData);
 
           results.push({
             rowNumber: record._rowNumber,
@@ -941,7 +933,6 @@ export class RCBMonthlyScraper {
       const processedDir = join(__dirname, '../../processed');
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       
-      // Generate basic patient Excel (backward compatibility)
       const excelFileName = `pacientes-${timestamp}.xlsx`;
       const excelPath = join(processedDir, excelFileName);
       let excelFilePath = null;
@@ -950,27 +941,13 @@ export class RCBMonthlyScraper {
         logger.info('Excel file generated', { excelFilePath, patientCount: patientDataArray.length });
       }
 
-      // Generate RCV format Excel
-      const rcvExcelFileName = `rcv-format-${timestamp}.xlsx`;
-      const rcvExcelPath = join(processedDir, rcvExcelFileName);
-      let rcvExcelFilePath = null;
-      if (rcvDataArray.length > 0) {
-        rcvExcelFilePath = await generateRCVExcel(rcvDataArray, rcvExcelPath);
-        logger.info('RCV Excel file generated', { rcvExcelFilePath, recordCount: rcvDataArray.length });
-      }
-
       const zipFileName = `historias-clinicas-${timestamp}.zip`;
       const zipPath = join(processedDir, zipFileName);
-      // Include both Excel files in ZIP
-      const additionalFiles = [];
-      if (rcvExcelFilePath && excelFilePath) {
-        additionalFiles.push(excelFilePath); // Include basic Excel if RCV exists
-      }
       const zipFilePath = await this.createZipArchive(
-        pdfFiles, 
-        rcvExcelFilePath || excelFilePath, 
+        pdfFiles,
+        excelFilePath,
         zipPath,
-        additionalFiles
+        []
       );
 
       return {
