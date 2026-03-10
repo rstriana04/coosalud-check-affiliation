@@ -194,6 +194,7 @@ ExtractionHelpers → DataExtractor → ExcelColumns → ExcelGenerator → Repo
 | Pediatric | primera-infancia, infancia, adolescencia | `pediatric-` | 44, 44, 44 |
 | Lifecycle | juventud, adultez, vejez | `lifecycle-` | 51, 58, 57 |
 | PlanificacionFamiliar | planificacion-familiar | `planfamiliar-` | 33 |
+| Citologias | citologias | `citologias-` | 53 |
 
 ### 14.3 File Creation Checklist
 

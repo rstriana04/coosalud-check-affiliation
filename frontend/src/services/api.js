@@ -153,4 +153,25 @@ export const getPlanFamiliarDownloadUrl = (jobId) => {
   return `${API_URL}/api/rcb-monthly/rcv-download/${jobId}`;
 };
 
+export const generateCitologiasReport = async (file, email) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (email) formData.append('email', email);
+
+  const response = await api.post('/rcb-monthly/generate-citologias', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 600000
+  });
+  return response.data;
+};
+
+export const getCitologiasJobStatus = async (jobId) => {
+  const response = await api.get(`/rcb-monthly/rcv-status/${jobId}`);
+  return response.data;
+};
+
+export const getCitologiasDownloadUrl = (jobId) => {
+  return `${API_URL}/api/rcb-monthly/rcv-download/${jobId}`;
+};
+
 export default api;

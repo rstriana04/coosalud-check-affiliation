@@ -8,6 +8,7 @@ import { RCVReportService } from '../services/rcvReportService.js';
 import { PediatricReportService } from '../services/pediatricReportService.js';
 import { LifecycleReportService } from '../services/lifecycleReportService.js';
 import { PlanificacionFamiliarReportService } from '../services/planificacionFamiliarReportService.js';
+import { CitologiasReportService } from '../services/citologiasReportService.js';
 import { logger } from '../utils/logger.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { emitLog } from '../services/socketService.js';
@@ -228,6 +229,37 @@ router.post('/generate-planificacion-familiar', upload.single('file'), async (re
   }
 });
 
+router.post('/generate-citologias', upload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) {
+      throw new AppError('Se requiere un archivo Excel', 400);
+    }
+
+    const { email, limit } = req.body;
+    const filePath = req.file.path;
+    const parsedLimit = limit ? parseInt(limit, 10) : undefined;
+    const jobId = `citologias-${Date.now()}`;
+
+    logger.info('Solicitud de generacion de informe citologias', {
+      jobId, file: req.file.originalname,
+      email: email || 'none', limit: parsedLimit || 'all'
+    });
+
+    activeJobs.set(jobId, {
+      status: 'processing',
+      startedAt: new Date().toISOString(),
+      filename: req.file.originalname
+    });
+
+    processCitologiasInBackground(jobId, filePath, email, parsedLimit);
+
+    res.json({ success: true, message: 'Procesamiento iniciado', jobId });
+  } catch (error) {
+    logger.error('Error en generacion de informe citologias', { error: error.message });
+    next(error);
+  }
+});
+
 async function processPlanFamiliarInBackground(jobId, filePath, email, limit) {
   try {
     const service = new PlanificacionFamiliarReportService();
@@ -254,6 +286,35 @@ async function processPlanFamiliarInBackground(jobId, filePath, email, limit) {
 
     emitLog('error', `Procesamiento planificacion familiar fallido: ${error.message}`, { jobId });
     logger.error('Background planificacion familiar job failed', { jobId, error: error.message });
+  }
+}
+
+async function processCitologiasInBackground(jobId, filePath, email, limit) {
+  try {
+    const service = new CitologiasReportService();
+    const result = await service.generateFromExcel(filePath, { email, limit, jobId });
+
+    activeJobs.set(jobId, {
+      status: 'completed',
+      completedAt: new Date().toISOString(),
+      zipFilePath: result.zipFilePath,
+      excelFilePath: result.excelFilePath,
+      fileName: result.zipFilePath ? result.zipFilePath.split('/').pop() : null,
+      summary: result.summary,
+      results: result.results
+    });
+
+    emitLog('success', 'Procesamiento citologias completado', { jobId });
+    logger.info('Background citologias job completed', { jobId });
+  } catch (error) {
+    activeJobs.set(jobId, {
+      status: 'failed',
+      error: error.message,
+      failedAt: new Date().toISOString()
+    });
+
+    emitLog('error', `Procesamiento citologias fallido: ${error.message}`, { jobId });
+    logger.error('Background citologias job failed', { jobId, error: error.message });
   }
 }
 
