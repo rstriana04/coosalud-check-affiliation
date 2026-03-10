@@ -7,6 +7,7 @@ import { RCBMonthlyScraper } from '../services/rcbMonthlyService.js';
 import { RCVReportService } from '../services/rcvReportService.js';
 import { PediatricReportService } from '../services/pediatricReportService.js';
 import { LifecycleReportService } from '../services/lifecycleReportService.js';
+import { PlanificacionFamiliarReportService } from '../services/planificacionFamiliarReportService.js';
 import { logger } from '../utils/logger.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { emitLog } from '../services/socketService.js';
@@ -195,6 +196,66 @@ router.post('/generate-lifecycle', upload.single('file'), async (req, res, next)
     next(error);
   }
 });
+
+router.post('/generate-planificacion-familiar', upload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) {
+      throw new AppError('Se requiere un archivo Excel', 400);
+    }
+
+    const { email, limit } = req.body;
+    const filePath = req.file.path;
+    const parsedLimit = limit ? parseInt(limit, 10) : undefined;
+    const jobId = `planfamiliar-${Date.now()}`;
+
+    logger.info('Solicitud de generacion de informe planificacion familiar', {
+      jobId, file: req.file.originalname,
+      email: email || 'none', limit: parsedLimit || 'all'
+    });
+
+    activeJobs.set(jobId, {
+      status: 'processing',
+      startedAt: new Date().toISOString(),
+      filename: req.file.originalname
+    });
+
+    processPlanFamiliarInBackground(jobId, filePath, email, parsedLimit);
+
+    res.json({ success: true, message: 'Procesamiento iniciado', jobId });
+  } catch (error) {
+    logger.error('Error en generacion de informe planificacion familiar', { error: error.message });
+    next(error);
+  }
+});
+
+async function processPlanFamiliarInBackground(jobId, filePath, email, limit) {
+  try {
+    const service = new PlanificacionFamiliarReportService();
+    const result = await service.generateFromExcel(filePath, { email, limit, jobId });
+
+    activeJobs.set(jobId, {
+      status: 'completed',
+      completedAt: new Date().toISOString(),
+      zipFilePath: result.zipFilePath,
+      excelFilePath: result.excelFilePath,
+      fileName: result.zipFilePath ? result.zipFilePath.split('/').pop() : null,
+      summary: result.summary,
+      results: result.results
+    });
+
+    emitLog('success', 'Procesamiento planificacion familiar completado', { jobId });
+    logger.info('Background planificacion familiar job completed', { jobId });
+  } catch (error) {
+    activeJobs.set(jobId, {
+      status: 'failed',
+      error: error.message,
+      failedAt: new Date().toISOString()
+    });
+
+    emitLog('error', `Procesamiento planificacion familiar fallido: ${error.message}`, { jobId });
+    logger.error('Background planificacion familiar job failed', { jobId, error: error.message });
+  }
+}
 
 async function processLifecycleInBackground(jobId, filePath, email, limit) {
   try {

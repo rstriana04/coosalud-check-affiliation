@@ -132,4 +132,25 @@ export const getLifecycleDownloadUrl = (jobId) => {
   return `${API_URL}/api/rcb-monthly/rcv-download/${jobId}`;
 };
 
+export const generatePlanFamiliarReport = async (file, email) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (email) formData.append('email', email);
+
+  const response = await api.post('/rcb-monthly/generate-planificacion-familiar', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 600000
+  });
+  return response.data;
+};
+
+export const getPlanFamiliarJobStatus = async (jobId) => {
+  const response = await api.get(`/rcb-monthly/rcv-status/${jobId}`);
+  return response.data;
+};
+
+export const getPlanFamiliarDownloadUrl = (jobId) => {
+  return `${API_URL}/api/rcb-monthly/rcv-download/${jobId}`;
+};
+
 export default api;

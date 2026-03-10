@@ -193,6 +193,7 @@ ExtractionHelpers → DataExtractor → ExcelColumns → ExcelGenerator → Repo
 | RCV | riesgo-cardiovascular | `rcv-` | 48 |
 | Pediatric | primera-infancia, infancia, adolescencia | `pediatric-` | 44, 44, 44 |
 | Lifecycle | juventud, adultez, vejez | `lifecycle-` | 51, 58, 57 |
+| PlanificacionFamiliar | planificacion-familiar | `planfamiliar-` | 33 |
 
 ### 14.3 File Creation Checklist
 

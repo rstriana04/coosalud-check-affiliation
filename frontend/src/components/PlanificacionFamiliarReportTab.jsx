@@ -3,13 +3,12 @@ import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/Card';
 import { Button } from './ui/Button';
 import { Badge } from './ui/Badge';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/Tabs';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow
 } from './ui/Table';
 import {
-  Calendar, FileText, Loader2, Upload, CheckCircle2,
-  XCircle, Download, Mail, HeartPulse, ClipboardList, Baby, Users, Heart
+  FileText, Loader2, Upload, CheckCircle2,
+  XCircle, Download, Mail, Heart
 } from 'lucide-react';
 import ProgressBar from './ProgressBar';
 import LogsViewer from './LogsViewer';
@@ -17,62 +16,10 @@ import { useWebSocket } from '@/hooks/useWebSocket';
 import { useProgress } from '@/hooks/useProgress';
 import { db } from '@/services/db';
 import * as api from '@/services/api';
-import PediatricReportTab from './PediatricReportTab';
-import LifecycleReportTab from './LifecycleReportTab';
-import PlanificacionFamiliarReportTab from './PlanificacionFamiliarReportTab';
 
-const RCV_JOB_KEY = 'current_rcv_job';
+const PLANFAMILIAR_JOB_KEY = 'current_planfamiliar_job';
 
-export default function RCBMonthly() {
-  return (
-    <Tabs defaultValue="rcv" className="space-y-6">
-      <TabsList className="grid w-full grid-cols-5 max-w-4xl">
-        <TabsTrigger value="rcv">
-          <HeartPulse className="w-4 h-4 mr-2" />
-          Informe RCV
-        </TabsTrigger>
-        <TabsTrigger value="pediatric">
-          <Baby className="w-4 h-4 mr-2" />
-          Informe Pediatrico
-        </TabsTrigger>
-        <TabsTrigger value="lifecycle">
-          <Users className="w-4 h-4 mr-2" />
-          Ciclo de Vida
-        </TabsTrigger>
-        <TabsTrigger value="planificacion">
-          <Heart className="w-4 h-4 mr-2" />
-          Planificacion Familiar
-        </TabsTrigger>
-        <TabsTrigger value="monthly">
-          <ClipboardList className="w-4 h-4 mr-2" />
-          Reporte Mensual
-        </TabsTrigger>
-      </TabsList>
-
-      <TabsContent value="rcv">
-        <RCVReportTab />
-      </TabsContent>
-
-      <TabsContent value="pediatric">
-        <PediatricReportTab />
-      </TabsContent>
-
-      <TabsContent value="lifecycle">
-        <LifecycleReportTab />
-      </TabsContent>
-
-      <TabsContent value="planificacion">
-        <PlanificacionFamiliarReportTab />
-      </TabsContent>
-
-      <TabsContent value="monthly">
-        <MonthlyReportTab />
-      </TabsContent>
-    </Tabs>
-  );
-}
-
-function RCVReportTab() {
+export default function PlanificacionFamiliarReportTab() {
   const [file, setFile] = useState(null);
   const [email, setEmail] = useState('');
   const [useEmail, setUseEmail] = useState(false);
@@ -87,7 +34,7 @@ function RCVReportTab() {
 
   const handleWebSocketEvent = useCallback((event, data) => {
     const eventJobId = data?.jobId || data?.data?.jobId;
-    if (!eventJobId || !eventJobId.startsWith('rcv-')) return;
+    if (!eventJobId || !eventJobId.startsWith('planfamiliar-')) return;
 
     switch (event) {
       case 'job:progress':
@@ -101,12 +48,34 @@ function RCVReportTab() {
 
   const { isConnected } = useWebSocket(handleWebSocketEvent);
 
+  const handleJobCompleted = useCallback(async (completedJobId, status) => {
+    setIsProcessing(false);
+    setResult({
+      success: true,
+      summary: status.summary,
+      results: status.results || [],
+      jobId: completedJobId
+    });
+    updateProgress({
+      percentage: 100,
+      processed: status.summary?.total || 0
+    });
+    toast.success('Informe planificacion familiar generado', {
+      description: `${status.summary?.successful || 0} de ${status.summary?.total || 0} pacientes`
+    });
+  }, [updateProgress]);
+
+  const handleJobFailed = useCallback((errorMsg) => {
+    setIsProcessing(false);
+    toast.error('Error en el procesamiento', { description: errorMsg });
+  }, []);
+
   useEffect(() => {
     if (hasRestoredRef.current) return;
     hasRestoredRef.current = true;
 
     const restore = async () => {
-      const saved = await db.getJob(RCV_JOB_KEY);
+      const saved = await db.getJob(PLANFAMILIAR_JOB_KEY);
       if (!saved || !saved.jobId) return;
 
       setJobId(saved.jobId);
@@ -117,7 +86,7 @@ function RCVReportTab() {
 
       if (saved.isProcessing) {
         try {
-          const status = await api.getRCVJobStatus(saved.jobId);
+          const status = await api.getPlanFamiliarJobStatus(saved.jobId);
           if (status.status === 'completed') {
             handleJobCompleted(saved.jobId, status);
           } else if (status.status === 'failed') {
@@ -133,13 +102,9 @@ function RCVReportTab() {
             setJobId(null);
             setResult(null);
             reset();
-            await db.deleteJob(RCV_JOB_KEY);
+            await db.deleteJob(PLANFAMILIAR_JOB_KEY);
             toast.warning('El proceso anterior se perdio', {
               description: 'El servidor se reinicio. Puedes iniciar un nuevo proceso.'
-            });
-          } else {
-            toast.info('Sesion restaurada', {
-              description: 'Reconectando al procesamiento...'
             });
           }
         }
@@ -153,44 +118,18 @@ function RCVReportTab() {
     if (!jobId || !progress.total) return;
     const saveState = async () => {
       await db.saveJob({
-        jobId,
-        filename,
-        isProcessing,
-        progress,
-        result
-      }, RCV_JOB_KEY);
+        jobId, filename, isProcessing, progress, result
+      }, PLANFAMILIAR_JOB_KEY);
     };
     saveState();
   }, [jobId, progress, isProcessing, filename, result]);
-
-  const handleJobCompleted = useCallback(async (completedJobId, status) => {
-    setIsProcessing(false);
-    setResult({
-      success: true,
-      summary: status.summary,
-      results: status.results || [],
-      jobId: completedJobId
-    });
-    updateProgress({
-      percentage: 100,
-      processed: status.summary?.total || 0
-    });
-    toast.success('Informe RCV generado', {
-      description: `${status.summary?.successful || 0} de ${status.summary?.total || 0} pacientes`
-    });
-  }, [updateProgress]);
-
-  const handleJobFailed = useCallback((errorMsg) => {
-    setIsProcessing(false);
-    toast.error('Error en el procesamiento', { description: errorMsg });
-  }, []);
 
   useEffect(() => {
     if (!isProcessing || !jobId) return;
 
     const checkInterval = setInterval(async () => {
       try {
-        const status = await api.getRCVJobStatus(jobId);
+        const status = await api.getPlanFamiliarJobStatus(jobId);
         if (status.status === 'completed') {
           clearInterval(checkInterval);
           handleJobCompleted(jobId, status);
@@ -205,7 +144,7 @@ function RCVReportTab() {
           setJobId(null);
           setResult(null);
           reset();
-          db.deleteJob(RCV_JOB_KEY);
+          db.deleteJob(PLANFAMILIAR_JOB_KEY);
           toast.warning('El proceso se perdio', {
             description: 'El servidor se reinicio. Puedes iniciar un nuevo proceso.'
           });
@@ -229,15 +168,11 @@ function RCVReportTab() {
 
   const handleFileSelect = useCallback((e) => {
     const selected = e.target.files?.[0];
-    if (selected) {
-      setFile(selected);
-      setResult(null);
-    }
+    if (selected) { setFile(selected); setResult(null); }
   }, []);
 
   const handleGenerate = async () => {
     if (!file) return;
-
     reset();
     setIsProcessing(true);
     setResult(null);
@@ -245,8 +180,7 @@ function RCVReportTab() {
 
     try {
       const emailToSend = useEmail && email ? email : undefined;
-      const response = await api.generateRCVReport(file, emailToSend);
-
+      const response = await api.generatePlanFamiliarReport(file, emailToSend);
       if (response.jobId) {
         setJobId(response.jobId);
         toast.info('Procesamiento iniciado', {
@@ -264,7 +198,7 @@ function RCVReportTab() {
   const handleDownload = () => {
     const downloadJobId = result?.jobId || jobId;
     if (downloadJobId) {
-      window.open(api.getRCVDownloadUrl(downloadJobId), '_blank');
+      window.open(api.getPlanFamiliarDownloadUrl(downloadJobId), '_blank');
     }
   };
 
@@ -275,7 +209,7 @@ function RCVReportTab() {
     setResult(null);
     setIsProcessing(false);
     setFilename('');
-    await db.deleteJob(RCV_JOB_KEY);
+    await db.deleteJob(PLANFAMILIAR_JOB_KEY);
   };
 
   return (
@@ -283,8 +217,8 @@ function RCVReportTab() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <HeartPulse className="w-5 h-5 text-red-500" />
-            Generar Informe de Riesgo Cardiovascular
+            <Heart className="w-5 h-5 text-pink-500" />
+            Generar Informe Planificacion Familiar
             {isConnected && (
               <Badge variant="outline" className="ml-auto text-xs font-normal text-green-600 border-green-300">
                 Conectado
@@ -293,7 +227,8 @@ function RCVReportTab() {
           </CardTitle>
           <CardDescription>
             Sube un archivo Excel con los pacientes a procesar. Columnas requeridas:
-            identipac, fecha_atencion, nombremedico. Opcional: programa.
+            identipac, fecha_atencion, nombremedico. La columna programa debe tener:
+            planificacion-familiar.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -335,7 +270,7 @@ function RCVReportTab() {
                 className="w-full sm:w-auto px-8"
               >
                 <FileText className="w-4 h-4 mr-2" />
-                Generar Informe RCV
+                Generar Informe Planificacion Familiar
               </Button>
             </>
           )}
@@ -355,9 +290,7 @@ function RCVReportTab() {
         </CardContent>
       </Card>
 
-      {isProcessing && progress.total > 0 && (
-        <ProgressBar progress={progress} />
-      )}
+      {isProcessing && progress.total > 0 && <ProgressBar progress={progress} />}
 
       {isProcessing && progress.total === 0 && (
         <Card>
@@ -371,63 +304,20 @@ function RCVReportTab() {
       )}
 
       {result && (
-        <RCVResults
+        <PlanFamiliarResults
           result={result}
           onDownload={handleDownload}
           hasJobId={!!(result?.jobId || jobId)}
         />
       )}
 
-      {(isProcessing || logs.length > 0) && (
-        <LogsViewer logs={logs} />
-      )}
+      {(isProcessing || logs.length > 0) && <LogsViewer logs={logs} />}
     </div>
   );
 }
 
-function FileDropzone({ file, fileInputRef, onDrop, onSelect }) {
-  return (
-    <div
-      onDrop={onDrop}
-      onDragOver={(e) => e.preventDefault()}
-      onClick={() => fileInputRef.current?.click()}
-      className={`
-        border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors
-        ${file ? 'border-green-400 bg-green-50' : 'border-gray-300 hover:border-primary hover:bg-gray-50'}
-      `}
-    >
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".xlsx,.xls"
-        onChange={onSelect}
-        className="hidden"
-      />
-      {file ? (
-        <div className="flex items-center justify-center gap-3">
-          <CheckCircle2 className="w-8 h-8 text-green-500" />
-          <div className="text-left">
-            <p className="font-medium text-green-700">{file.name}</p>
-            <p className="text-sm text-green-600">
-              {(file.size / 1024).toFixed(1)} KB
-            </p>
-          </div>
-        </div>
-      ) : (
-        <div>
-          <Upload className="w-10 h-10 mx-auto text-gray-400 mb-3" />
-          <p className="font-medium text-gray-700">Arrastra tu archivo Excel aqui</p>
-          <p className="text-sm text-gray-500 mt-1">o haz clic para seleccionar</p>
-          <p className="text-xs text-gray-400 mt-2">Formatos: .xlsx, .xls</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function RCVResults({ result, onDownload, hasJobId }) {
+function PlanFamiliarResults({ result, onDownload, hasJobId }) {
   if (!result) return null;
-
   const { summary, results } = result;
 
   return (
@@ -493,152 +383,51 @@ function RCVResults({ result, onDownload, hasJobId }) {
   );
 }
 
+function FileDropzone({ file, fileInputRef, onDrop, onSelect }) {
+  return (
+    <div
+      onDrop={onDrop}
+      onDragOver={(e) => e.preventDefault()}
+      onClick={() => fileInputRef.current?.click()}
+      className={`
+        border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors
+        ${file ? 'border-green-400 bg-green-50' : 'border-gray-300 hover:border-primary hover:bg-gray-50'}
+      `}
+    >
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".xlsx,.xls"
+        onChange={onSelect}
+        className="hidden"
+      />
+      {file ? (
+        <div className="flex items-center justify-center gap-3">
+          <CheckCircle2 className="w-8 h-8 text-green-500" />
+          <div className="text-left">
+            <p className="font-medium text-green-700">{file.name}</p>
+            <p className="text-sm text-green-600">
+              {(file.size / 1024).toFixed(1)} KB
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div>
+          <Upload className="w-10 h-10 mx-auto text-gray-400 mb-3" />
+          <p className="font-medium text-gray-700">Arrastra tu archivo Excel aqui</p>
+          <p className="text-sm text-gray-500 mt-1">o haz clic para seleccionar</p>
+          <p className="text-xs text-gray-400 mt-2">Formatos: .xlsx, .xls</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SummaryCard({ label, value, color }) {
   return (
     <div className="rounded-lg border bg-gray-50 p-4 text-center">
       <p className="text-sm text-gray-500">{label}</p>
       <p className={`text-3xl font-bold ${color}`}>{value}</p>
-    </div>
-  );
-}
-
-function MonthlyReportTab() {
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [reportData, setReportData] = useState([]);
-  const [isGenerating, setIsGenerating] = useState(false);
-
-  const handleGenerateReport = async () => {
-    try {
-      setIsGenerating(true);
-      toast.loading('Generando informe...', {
-        id: 'rcb-report',
-        description: 'Este proceso puede tomar varios minutos'
-      });
-
-      const response = await api.generateRCBMonthlyReport(startDate, endDate);
-
-      toast.success('Informe generado exitosamente', {
-        id: 'rcb-report',
-        description: 'El archivo ha sido descargado'
-      });
-
-      console.log('Report generated:', response);
-    } catch (error) {
-      toast.error('Error al generar informe', {
-        id: 'rcb-report',
-        description: error.response?.data?.message || error.message
-      });
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <FileText className="w-5 h-5" />
-            Reporte Mensual por Rango de Fechas
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-end gap-4">
-            <div className="flex-1">
-              <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 mb-2">
-                Fecha desde
-              </label>
-              <div className="relative">
-                <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <input
-                  id="startDate"
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
-                />
-              </div>
-            </div>
-
-            <div className="flex-1">
-              <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 mb-2">
-                Fecha hasta
-              </label>
-              <div className="relative">
-                <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <input
-                  id="endDate"
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
-                />
-              </div>
-            </div>
-
-            <Button
-              onClick={handleGenerateReport}
-              disabled={!startDate || !endDate || isGenerating}
-              className="px-6"
-            >
-              {isGenerating ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Generando...
-                </>
-              ) : (
-                <>
-                  <FileText className="w-4 h-4 mr-2" />
-                  Generar informe
-                </>
-              )}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Resultados del Informe</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>#</TableHead>
-                  <TableHead>Tipo Doc</TableHead>
-                  <TableHead>Numero Documento</TableHead>
-                  <TableHead>Fecha Afiliacion</TableHead>
-                  <TableHead>Estado</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {reportData.length > 0 ? (
-                  reportData.map((row, index) => (
-                    <TableRow key={index}>
-                      <TableCell>{index + 1}</TableCell>
-                      <TableCell>{row.tipoDocumento}</TableCell>
-                      <TableCell>{row.numeroDocumento}</TableCell>
-                      <TableCell>{row.fechaAfiliacion}</TableCell>
-                      <TableCell>{row.estado}</TableCell>
-                    </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={5} className="h-24 text-center">
-                      <div className="text-gray-500">
-                        No hay datos para mostrar. Selecciona un rango de fechas y genera el informe.
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }
