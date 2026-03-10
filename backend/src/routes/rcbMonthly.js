@@ -7,6 +7,7 @@ import { RCBMonthlyScraper } from '../services/rcbMonthlyService.js';
 import { RCVReportService } from '../services/rcvReportService.js';
 import { logger } from '../utils/logger.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { emitLog } from '../services/socketService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -77,30 +78,28 @@ router.post('/generate-rcv', upload.single('file'), async (req, res, next) => {
     const { email, limit } = req.body;
     const filePath = req.file.path;
     const parsedLimit = limit ? parseInt(limit, 10) : undefined;
+    const jobId = `rcv-${Date.now()}`;
 
     logger.info('Solicitud de generacion de informe RCV', {
+      jobId,
       file: req.file.originalname,
       email: email || 'none',
       limit: parsedLimit || 'all'
     });
 
-    if (email) {
-      const jobId = `rcv-${Date.now()}`;
-      activeJobs.set(jobId, { status: 'processing', startedAt: new Date().toISOString() });
+    activeJobs.set(jobId, {
+      status: 'processing',
+      startedAt: new Date().toISOString(),
+      filename: req.file.originalname
+    });
 
-      processInBackground(jobId, filePath, email, parsedLimit);
+    processInBackground(jobId, filePath, email, parsedLimit);
 
-      return res.json({
-        success: true,
-        message: 'Procesamiento iniciado. Se enviara el resultado por email.',
-        jobId
-      });
-    }
-
-    const service = new RCVReportService();
-    const result = await service.generateFromExcel(filePath, { limit: parsedLimit });
-
-    res.json(result);
+    res.json({
+      success: true,
+      message: 'Procesamiento iniciado',
+      jobId
+    });
   } catch (error) {
     logger.error('Error en generacion de informe RCV', { error: error.message });
     next(error);
@@ -136,7 +135,7 @@ router.get('/rcv-download/:jobId', (req, res, next) => {
 async function processInBackground(jobId, filePath, email, limit) {
   try {
     const service = new RCVReportService();
-    const result = await service.generateFromExcel(filePath, { email, limit });
+    const result = await service.generateFromExcel(filePath, { email, limit, jobId });
 
     activeJobs.set(jobId, {
       status: 'completed',
@@ -144,9 +143,11 @@ async function processInBackground(jobId, filePath, email, limit) {
       zipFilePath: result.zipFilePath,
       excelFilePath: result.excelFilePath,
       fileName: result.zipFilePath ? result.zipFilePath.split('/').pop() : null,
-      summary: result.summary
+      summary: result.summary,
+      results: result.results
     });
 
+    emitLog('success', 'Procesamiento completado', { jobId });
     logger.info('Background RCV job completed', { jobId });
   } catch (error) {
     activeJobs.set(jobId, {
@@ -155,6 +156,7 @@ async function processInBackground(jobId, filePath, email, limit) {
       failedAt: new Date().toISOString()
     });
 
+    emitLog('error', `Procesamiento fallido: ${error.message}`, { jobId });
     logger.error('Background RCV job failed', { jobId, error: error.message });
   }
 }

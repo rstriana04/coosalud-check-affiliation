@@ -8,6 +8,7 @@ import { generateRCVExcel } from '../utils/rcvExcelGenerator.js';
 import { getLastPA, savePatientVisit } from '../utils/patientDataStore.js';
 import { sendReportEmail } from '../utils/emailService.js';
 import { logger } from '../utils/logger.js';
+import { emitJobProgress, emitLog, emitJobCompleted, emitJobFailed } from './socketService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -18,14 +19,21 @@ export class RCVReportService {
   }
 
   async generateFromExcel(inputExcelPath, options = {}) {
-    const { email, limit } = options;
+    const { email, limit, jobId } = options;
     let results = [];
     let excelFilePath = null;
     let zipFilePath = null;
 
     try {
+      this.emitRcvLog(jobId, 'info', 'Leyendo archivo Excel...');
       const { patients: allPatients, programa } = await readInputExcel(inputExcelPath);
       const patients = limit ? allPatients.slice(0, limit) : allPatients;
+
+      this.emitRcvLog(jobId, 'info', `${patients.length} pacientes encontrados`, {
+        total: patients.length,
+        originalTotal: allPatients.length,
+        programa
+      });
 
       logger.info('Iniciando generacion de informe RCV', {
         totalPatients: patients.length,
@@ -34,20 +42,32 @@ export class RCVReportService {
         email: email || 'none'
       });
 
+      this.emitRcvLog(jobId, 'info', 'Iniciando sesion en Macaw...');
       await this.scraper.initialize();
       await this.scraper.login();
+      this.emitRcvLog(jobId, 'success', 'Sesion iniciada correctamente');
 
-      results = await this.processPatients(patients);
+      this.emitRcvProgress(jobId, {
+        total: patients.length,
+        processed: 0,
+        success: 0,
+        failed: 0,
+        percentage: 0
+      });
+
+      results = await this.processPatients(patients, jobId);
 
       const successfulData = results
         .filter(r => r.status === 'success')
         .map(r => r.rcvData);
 
       if (successfulData.length === 0) {
+        this.emitRcvLog(jobId, 'warning', 'Ningun paciente procesado exitosamente');
         logger.warn('Ningun paciente procesado exitosamente');
         return this.buildResponse(results, null, null, programa);
       }
 
+      this.emitRcvLog(jobId, 'info', 'Generando Excel RCV...');
       const outputDir = this.ensureOutputDir();
       const timestamp = this.timestamp();
       const filePrefix = programa || `${this.today()}-202-informe`;
@@ -59,50 +79,59 @@ export class RCVReportService {
         .filter(r => r.pdfPath)
         .map(r => r.pdfPath);
 
+      this.emitRcvLog(jobId, 'info', 'Creando archivo ZIP...');
       const zipPath = join(outputDir, `${filePrefix}-${timestamp}.zip`);
       zipFilePath = await this.scraper.createZipArchive(
         pdfFiles, excelFilePath, zipPath
       );
 
       if (email && zipFilePath) {
+        this.emitRcvLog(jobId, 'info', `Enviando email a ${email}...`);
         await this.sendEmail(email, zipFilePath, results, programa);
+        this.emitRcvLog(jobId, 'success', 'Email enviado correctamente');
       }
 
       return this.buildResponse(results, excelFilePath, zipFilePath, programa);
     } catch (error) {
       logger.error('Error generando informe RCV', { error: error.message });
+      this.emitRcvLog(jobId, 'error', `Error fatal: ${error.message}`);
       throw error;
     } finally {
       await this.scraper.close();
     }
   }
 
-  async processPatients(patients) {
+  async processPatients(patients, jobId) {
     const results = [];
     const MAX_RETRIES = 3;
+    let successCount = 0;
+    let failedCount = 0;
 
     for (let i = 0; i < patients.length; i++) {
       const patient = patients[i];
       const logPrefix = `[${i + 1}/${patients.length}]`;
       let lastError = null;
 
+      this.emitRcvLog(jobId, 'info', `${logPrefix} Procesando paciente ${patient.identipac}`, {
+        fecha: patient.fecha_atencion
+      });
+
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
           if (attempt > 1) {
+            this.emitRcvLog(jobId, 'warning', `${logPrefix} Reintento ${attempt}/${MAX_RETRIES} para ${patient.identipac}`);
             logger.info(`${logPrefix} Reintento ${attempt}/${MAX_RETRIES}`, {
               identipac: patient.identipac
             });
             await this.scraper.page.waitForTimeout(2000 * attempt);
-          } else {
-            logger.info(`${logPrefix} Procesando paciente`, {
-              identipac: patient.identipac,
-              fecha: patient.fecha_atencion
-            });
           }
 
-          const result = await this.processOnePatient(patient, logPrefix);
+          const result = await this.processOnePatient(patient, logPrefix, jobId);
           results.push(result);
           lastError = null;
+          successCount++;
+
+          this.emitRcvLog(jobId, 'success', `${logPrefix} Paciente ${patient.identipac} procesado exitosamente`);
           break;
         } catch (error) {
           lastError = error;
@@ -118,6 +147,8 @@ export class RCVReportService {
       }
 
       if (lastError) {
+        failedCount++;
+        this.emitRcvLog(jobId, 'error', `${logPrefix} Fallido: ${patient.identipac} - ${lastError.message}`);
         logger.error(`${logPrefix} Fallido tras ${MAX_RETRIES} intentos`, {
           identipac: patient.identipac,
           error: lastError.message
@@ -134,6 +165,14 @@ export class RCVReportService {
         });
       }
 
+      this.emitRcvProgress(jobId, {
+        total: patients.length,
+        processed: i + 1,
+        success: successCount,
+        failed: failedCount,
+        percentage: Math.round(((i + 1) / patients.length) * 100)
+      });
+
       if (i < patients.length - 1) {
         await this.scraper.page.waitForTimeout(1000);
       }
@@ -142,19 +181,26 @@ export class RCVReportService {
     return results;
   }
 
-  async processOnePatient(patient, logPrefix) {
+  async processOnePatient(patient, logPrefix, jobId) {
+    this.emitRcvLog(jobId, 'info', `${logPrefix} Navegando a historia clinica...`);
     await this.scraper.navigateToPatientHistory();
+
+    this.emitRcvLog(jobId, 'info', `${logPrefix} Buscando paciente ${patient.identipac}...`);
     const patientId = await this.scraper.searchPatient(patient.identipac);
+
+    this.emitRcvLog(jobId, 'info', `${logPrefix} Buscando cita del ${patient.fecha_atencion}...`);
     const codCita = await this.scraper.filterAndExtractCodCita(patient.fecha_atencion);
 
     if (!codCita) {
       throw new Error(`CodCita no encontrado para fecha ${patient.fecha_atencion}`);
     }
 
+    this.emitRcvLog(jobId, 'info', `${logPrefix} CodCita: ${codCita}, descargando PDF...`);
     const pdfPath = await this.scraper.downloadPatientPDF(
       codCita, patientId, patient.identipac, patient.fecha_atencion
     );
 
+    this.emitRcvLog(jobId, 'info', `${logPrefix} Extrayendo datos RCV...`);
     const extractor = new RCVDataExtractor(pdfPath);
     const rcvData = await extractor.extract(patient.fecha_atencion);
 
@@ -183,14 +229,22 @@ export class RCVReportService {
     };
   }
 
+  emitRcvProgress(jobId, progress) {
+    if (!jobId) return;
+    emitJobProgress(jobId, progress);
+  }
+
+  emitRcvLog(jobId, level, message, data = {}) {
+    if (!jobId) return;
+    emitLog(level, message, { ...data, jobId });
+  }
+
   async recoverFromError() {
     try {
       const page = this.scraper.page;
       if (!page || page.isClosed()) {
         logger.warn('Page closed, reinitializing browser');
-        await this.scraper.close();
-        await this.scraper.initialize();
-        await this.scraper.login();
+        await this.reinitializeScraper();
         return;
       }
 
@@ -198,14 +252,27 @@ export class RCVReportService {
         waitUntil: 'networkidle',
         timeout: 30000
       });
+
+      const menuVisible = await page.$('#menu2');
+      if (!menuVisible) {
+        logger.warn('Menu not found after recovery navigation, re-logging in');
+        await this.reinitializeScraper();
+        return;
+      }
+
+      logger.info('Recovery successful, menu is visible');
     } catch (navError) {
       logger.warn('Recovery navigation failed, reinitializing', { error: navError.message });
-      try {
-        await this.scraper.close();
-      } catch (_) {}
-      await this.scraper.initialize();
-      await this.scraper.login();
+      await this.reinitializeScraper();
     }
+  }
+
+  async reinitializeScraper() {
+    try {
+      await this.scraper.close();
+    } catch (_) {}
+    await this.scraper.initialize();
+    await this.scraper.login();
   }
 
   extractLabSummary(rcvData) {

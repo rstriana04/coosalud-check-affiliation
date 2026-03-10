@@ -3,7 +3,6 @@ import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/Card';
 import { Button } from './ui/Button';
 import { Badge } from './ui/Badge';
-import { Progress } from './ui/Progress';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/Tabs';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow
@@ -12,7 +11,14 @@ import {
   Calendar, FileText, Loader2, Upload, CheckCircle2,
   XCircle, Download, Mail, HeartPulse, ClipboardList
 } from 'lucide-react';
+import ProgressBar from './ProgressBar';
+import LogsViewer from './LogsViewer';
+import { useWebSocket } from '@/hooks/useWebSocket';
+import { useProgress } from '@/hooks/useProgress';
+import { db } from '@/services/db';
 import * as api from '@/services/api';
+
+const RCV_JOB_KEY = 'current_rcv_job';
 
 export default function RCBMonthly() {
   return (
@@ -44,17 +50,144 @@ function RCVReportTab() {
   const [email, setEmail] = useState('');
   const [useEmail, setUseEmail] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [result, setResult] = useState(null);
   const [jobId, setJobId] = useState(null);
-  const [jobStatus, setJobStatus] = useState(null);
+  const [result, setResult] = useState(null);
+  const [filename, setFilename] = useState('');
   const fileInputRef = useRef(null);
-  const pollingRef = useRef(null);
+  const hasRestoredRef = useRef(false);
+
+  const { progress, logs, updateProgress, addLog, reset } = useProgress();
+
+  const handleWebSocketEvent = useCallback((event, data) => {
+    const eventJobId = data?.jobId || data?.data?.jobId;
+    if (!eventJobId || !eventJobId.startsWith('rcv-')) return;
+
+    switch (event) {
+      case 'job:progress':
+        updateProgress(data);
+        break;
+      case 'logs:new':
+        addLog(data);
+        break;
+    }
+  }, [updateProgress, addLog]);
+
+  const { isConnected } = useWebSocket(handleWebSocketEvent);
 
   useEffect(() => {
-    return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
+    if (hasRestoredRef.current) return;
+    hasRestoredRef.current = true;
+
+    const restore = async () => {
+      const saved = await db.getJob(RCV_JOB_KEY);
+      if (!saved || !saved.jobId) return;
+
+      setJobId(saved.jobId);
+      setFilename(saved.filename || '');
+      setIsProcessing(saved.isProcessing || false);
+      if (saved.progress) updateProgress(saved.progress);
+      if (saved.result) setResult(saved.result);
+
+      if (saved.isProcessing) {
+        try {
+          const status = await api.getRCVJobStatus(saved.jobId);
+          if (status.status === 'completed') {
+            handleJobCompleted(saved.jobId, status);
+          } else if (status.status === 'failed') {
+            handleJobFailed(status.error);
+          } else {
+            toast.info('Sesion restaurada', {
+              description: `Procesamiento de ${saved.filename} en curso`
+            });
+          }
+        } catch (err) {
+          if (err.response?.status === 404) {
+            setIsProcessing(false);
+            setJobId(null);
+            setResult(null);
+            reset();
+            await db.deleteJob(RCV_JOB_KEY);
+            toast.warning('El proceso anterior se perdio', {
+              description: 'El servidor se reinicio. Puedes iniciar un nuevo proceso.'
+            });
+          } else {
+            toast.info('Sesion restaurada', {
+              description: 'Reconectando al procesamiento...'
+            });
+          }
+        }
+      }
     };
+
+    restore();
   }, []);
+
+  useEffect(() => {
+    if (!jobId || !progress.total) return;
+    const saveState = async () => {
+      await db.saveJob({
+        jobId,
+        filename,
+        isProcessing,
+        progress,
+        result
+      }, RCV_JOB_KEY);
+    };
+    saveState();
+  }, [jobId, progress, isProcessing, filename, result]);
+
+  const handleJobCompleted = useCallback(async (completedJobId, status) => {
+    setIsProcessing(false);
+    setResult({
+      success: true,
+      summary: status.summary,
+      results: status.results || [],
+      jobId: completedJobId
+    });
+    updateProgress({
+      percentage: 100,
+      processed: status.summary?.total || 0
+    });
+    toast.success('Informe RCV generado', {
+      description: `${status.summary?.successful || 0} de ${status.summary?.total || 0} pacientes`
+    });
+  }, [updateProgress]);
+
+  const handleJobFailed = useCallback((errorMsg) => {
+    setIsProcessing(false);
+    toast.error('Error en el procesamiento', { description: errorMsg });
+  }, []);
+
+  useEffect(() => {
+    if (!isProcessing || !jobId) return;
+
+    const checkInterval = setInterval(async () => {
+      try {
+        const status = await api.getRCVJobStatus(jobId);
+        if (status.status === 'completed') {
+          clearInterval(checkInterval);
+          handleJobCompleted(jobId, status);
+        } else if (status.status === 'failed') {
+          clearInterval(checkInterval);
+          handleJobFailed(status.error);
+        }
+      } catch (err) {
+        if (err.response?.status === 404) {
+          clearInterval(checkInterval);
+          setIsProcessing(false);
+          setJobId(null);
+          setResult(null);
+          reset();
+          db.deleteJob(RCV_JOB_KEY);
+          toast.warning('El proceso se perdio', {
+            description: 'El servidor se reinicio. Puedes iniciar un nuevo proceso.'
+          });
+        }
+      }
+    }, 10000);
+
+    return () => clearInterval(checkInterval);
+  }, [isProcessing, jobId, handleJobCompleted, handleJobFailed]);
 
   const handleFileDrop = useCallback((e) => {
     e.preventDefault();
@@ -75,44 +208,13 @@ function RCVReportTab() {
     }
   }, []);
 
-  const pollJobStatus = useCallback((id) => {
-    pollingRef.current = setInterval(async () => {
-      try {
-        const status = await api.getRCVJobStatus(id);
-        setJobStatus(status);
-
-        if (status.status === 'completed' || status.status === 'failed') {
-          clearInterval(pollingRef.current);
-          pollingRef.current = null;
-          setIsProcessing(false);
-
-          if (status.status === 'completed') {
-            toast.success('Informe generado y enviado por email', { id: 'rcv-report' });
-            setResult({ success: true, summary: status.summary, jobId: id });
-          } else {
-            toast.error('Error en el procesamiento', {
-              id: 'rcv-report',
-              description: status.error
-            });
-          }
-        }
-      } catch {
-        // keep polling
-      }
-    }, 5000);
-  }, []);
-
   const handleGenerate = async () => {
     if (!file) return;
 
+    reset();
     setIsProcessing(true);
     setResult(null);
-    setJobStatus(null);
-
-    toast.loading('Procesando informe RCV...', {
-      id: 'rcv-report',
-      description: 'Este proceso puede tomar varios minutos'
-    });
+    setFilename(file.name);
 
     try {
       const emailToSend = useEmail && email ? email : undefined;
@@ -120,33 +222,33 @@ function RCVReportTab() {
 
       if (response.jobId) {
         setJobId(response.jobId);
-        setJobStatus({ status: 'processing' });
-        toast.loading('Procesando en segundo plano...', {
-          id: 'rcv-report',
-          description: 'Se enviara el resultado por email'
-        });
-        pollJobStatus(response.jobId);
-      } else {
-        setIsProcessing(false);
-        setResult(response);
-        toast.success('Informe RCV generado', {
-          id: 'rcv-report',
-          description: `${response.summary?.successful || 0} de ${response.summary?.total || 0} pacientes procesados`
+        toast.info('Procesamiento iniciado', {
+          description: 'Puedes ver el progreso en tiempo real'
         });
       }
     } catch (error) {
       setIsProcessing(false);
-      toast.error('Error generando informe', {
-        id: 'rcv-report',
+      toast.error('Error iniciando procesamiento', {
         description: error.response?.data?.message || error.message
       });
     }
   };
 
   const handleDownload = () => {
-    if (jobId) {
-      window.open(api.getRCVDownloadUrl(jobId), '_blank');
+    const downloadJobId = result?.jobId || jobId;
+    if (downloadJobId) {
+      window.open(api.getRCVDownloadUrl(downloadJobId), '_blank');
     }
+  };
+
+  const handleNewProcess = async () => {
+    reset();
+    setFile(null);
+    setJobId(null);
+    setResult(null);
+    setIsProcessing(false);
+    setFilename('');
+    await db.deleteJob(RCV_JOB_KEY);
   };
 
   return (
@@ -156,6 +258,11 @@ function RCVReportTab() {
           <CardTitle className="flex items-center gap-2">
             <HeartPulse className="w-5 h-5 text-red-500" />
             Generar Informe de Riesgo Cardiovascular
+            {isConnected && (
+              <Badge variant="outline" className="ml-auto text-xs font-normal text-green-600 border-green-300">
+                Conectado
+              </Badge>
+            )}
           </CardTitle>
           <CardDescription>
             Sube un archivo Excel con los pacientes a procesar. Columnas requeridas:
@@ -163,101 +270,130 @@ function RCVReportTab() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div
-            onDrop={handleFileDrop}
-            onDragOver={(e) => e.preventDefault()}
-            onClick={() => fileInputRef.current?.click()}
-            className={`
-              border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors
-              ${file ? 'border-green-400 bg-green-50' : 'border-gray-300 hover:border-primary hover:bg-gray-50'}
-            `}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={handleFileSelect}
-              className="hidden"
-            />
-            {file ? (
-              <div className="flex items-center justify-center gap-3">
-                <CheckCircle2 className="w-8 h-8 text-green-500" />
-                <div className="text-left">
-                  <p className="font-medium text-green-700">{file.name}</p>
-                  <p className="text-sm text-green-600">
-                    {(file.size / 1024).toFixed(1)} KB — Clic para cambiar
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <div>
-                <Upload className="w-10 h-10 mx-auto text-gray-400 mb-3" />
-                <p className="font-medium text-gray-700">Arrastra tu archivo Excel aqui</p>
-                <p className="text-sm text-gray-500 mt-1">o haz clic para seleccionar</p>
-                <p className="text-xs text-gray-400 mt-2">Formatos: .xlsx, .xls</p>
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={useEmail}
-                onChange={(e) => setUseEmail(e.target.checked)}
-                className="rounded border-gray-300 text-primary focus:ring-primary"
+          {!isProcessing && !result && (
+            <>
+              <FileDropzone
+                file={file}
+                fileInputRef={fileInputRef}
+                onDrop={handleFileDrop}
+                onSelect={handleFileSelect}
               />
-              <Mail className="w-4 h-4 text-gray-500" />
-              <span className="text-sm text-gray-700">Enviar resultado por email</span>
-            </label>
-          </div>
 
-          {useEmail && (
-            <input
-              type="email"
-              placeholder="correo@ejemplo.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full max-w-sm px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-            />
-          )}
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={useEmail}
+                    onChange={(e) => setUseEmail(e.target.checked)}
+                    className="rounded border-gray-300 text-primary focus:ring-primary"
+                  />
+                  <Mail className="w-4 h-4 text-gray-500" />
+                  <span className="text-sm text-gray-700">Enviar resultado por email</span>
+                </label>
+              </div>
 
-          <Button
-            onClick={handleGenerate}
-            disabled={!file || isProcessing || (useEmail && !email)}
-            className="w-full sm:w-auto px-8"
-          >
-            {isProcessing ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Procesando...
-              </>
-            ) : (
-              <>
+              {useEmail && (
+                <input
+                  type="email"
+                  placeholder="correo@ejemplo.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full max-w-sm px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                />
+              )}
+
+              <Button
+                onClick={handleGenerate}
+                disabled={!file || isProcessing || (useEmail && !email)}
+                className="w-full sm:w-auto px-8"
+              >
                 <FileText className="w-4 h-4 mr-2" />
                 Generar Informe RCV
-              </>
-            )}
-          </Button>
+              </Button>
+            </>
+          )}
+
+          {(isProcessing || result) && (
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-gray-600">
+                Archivo: <span className="font-medium">{filename || file?.name}</span>
+              </div>
+              {!isProcessing && result && (
+                <Button variant="outline" size="sm" onClick={handleNewProcess}>
+                  Nuevo proceso
+                </Button>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 
-      {isProcessing && jobStatus?.status === 'processing' && (
+      {isProcessing && progress.total > 0 && (
+        <ProgressBar progress={progress} />
+      )}
+
+      {isProcessing && progress.total === 0 && (
         <Card>
           <CardContent className="py-6">
-            <div className="flex items-center gap-3 mb-3">
+            <div className="flex items-center gap-3">
               <Loader2 className="w-5 h-5 animate-spin text-primary" />
-              <span className="font-medium">Procesando en segundo plano...</span>
+              <span className="font-medium">Iniciando procesamiento...</span>
             </div>
-            <Progress value={30} className="mb-2" />
-            <p className="text-sm text-gray-500">
-              El resultado se enviara a {email} cuando finalice.
-            </p>
           </CardContent>
         </Card>
       )}
 
-      {result && <RCVResults result={result} onDownload={handleDownload} hasJobId={!!jobId} />}
+      {result && (
+        <RCVResults
+          result={result}
+          onDownload={handleDownload}
+          hasJobId={!!(result?.jobId || jobId)}
+        />
+      )}
+
+      {(isProcessing || logs.length > 0) && (
+        <LogsViewer logs={logs} />
+      )}
+    </div>
+  );
+}
+
+function FileDropzone({ file, fileInputRef, onDrop, onSelect }) {
+  return (
+    <div
+      onDrop={onDrop}
+      onDragOver={(e) => e.preventDefault()}
+      onClick={() => fileInputRef.current?.click()}
+      className={`
+        border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors
+        ${file ? 'border-green-400 bg-green-50' : 'border-gray-300 hover:border-primary hover:bg-gray-50'}
+      `}
+    >
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".xlsx,.xls"
+        onChange={onSelect}
+        className="hidden"
+      />
+      {file ? (
+        <div className="flex items-center justify-center gap-3">
+          <CheckCircle2 className="w-8 h-8 text-green-500" />
+          <div className="text-left">
+            <p className="font-medium text-green-700">{file.name}</p>
+            <p className="text-sm text-green-600">
+              {(file.size / 1024).toFixed(1)} KB
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div>
+          <Upload className="w-10 h-10 mx-auto text-gray-400 mb-3" />
+          <p className="font-medium text-gray-700">Arrastra tu archivo Excel aqui</p>
+          <p className="text-sm text-gray-500 mt-1">o haz clic para seleccionar</p>
+          <p className="text-xs text-gray-400 mt-2">Formatos: .xlsx, .xls</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -289,7 +425,7 @@ function RCVResults({ result, onDownload, hasJobId }) {
           </div>
 
           {results && results.length > 0 && (
-            <div className="rounded-md border">
+            <div className="rounded-md border max-h-96 overflow-y-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -316,7 +452,7 @@ function RCVResults({ result, onDownload, hasJobId }) {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-sm text-gray-500 max-w-xs truncate">
-                        {r.error || '—'}
+                        {r.error || '\u2014'}
                       </TableCell>
                     </TableRow>
                   ))}

@@ -370,12 +370,26 @@ export class RCBMonthlyScraper {
     try {
       logger.debug('Navigating to patient history section');
 
-      await this.page.click('#menu2 > nav > div > ul > li:nth-child(6)');
-      await this.page.waitForTimeout(1000);
+      const historyUrl = this.baseUrl + 'administrador/componentes/consultarhistoriaclinica.php';
 
-      await this.page.click('#menu2 > nav > div > ul > li.m-a-.contains-items.items-expanded > ul > li.sm-a-86 > a');
-      await this.page.waitForTimeout(2000);
+      let frame = this.page.frame({ name: 'contenido' });
 
+      if (frame) {
+        await frame.goto(historyUrl, { waitUntil: 'networkidle', timeout: 15000 });
+      } else {
+        await this.page.evaluate((url) => {
+          const iframe = document.querySelector('iframe[name="contenido"]');
+          if (iframe) iframe.src = url;
+        }, historyUrl);
+        await this.page.waitForTimeout(3000);
+        frame = this.page.frame({ name: 'contenido' });
+      }
+
+      if (!frame) {
+        throw new Error('Could not find contenido iframe after navigation');
+      }
+
+      await frame.waitForSelector('#txt1pacienteno', { timeout: 10000 });
       logger.info('Successfully navigated to patient history section');
     } catch (error) {
       logger.error('Failed to navigate to patient history', { error: error.message });
@@ -387,21 +401,25 @@ export class RCBMonthlyScraper {
     try {
       logger.debug('Searching for patient', { documentNumber });
 
-      await this.page.waitForTimeout(2000);
-
-      // Get frame using page.frame() method
       let frame = this.page.frame({ name: 'contenido' });
-      
+
       if (!frame) {
         frame = this.page.frame({ url: /consultahistoriaclinica\.php/ });
       }
 
       if (!frame) {
         const frames = this.page.frames();
-        logger.error('Frame not found', { 
+        logger.error('Frame not found', {
           availableFrames: frames.map(f => ({ name: f.name(), url: f.url() }))
         });
         throw new Error('Could not find iframe for patient search');
+      }
+
+      const frameUrl = frame.url();
+      if (!frameUrl.includes('consultarhistoriaclinica')) {
+        logger.warn('Frame is on wrong page, re-navigating', { frameUrl });
+        const historyUrl = this.baseUrl + 'administrador/componentes/consultarhistoriaclinica.php';
+        await frame.goto(historyUrl, { waitUntil: 'networkidle', timeout: 15000 });
       }
 
       logger.debug('Found frame', { frameName: frame.name(), frameUrl: frame.url() });
@@ -515,22 +533,164 @@ export class RCBMonthlyScraper {
     }
   }
 
+  async setMaxRecordsPerPage(frame) {
+    try {
+      const changed = await frame.evaluate(() => {
+        const select = document.querySelector('#selnumreg');
+        if (!select) return null;
+
+        select.value = '300';
+        return { value: '300' };
+      });
+
+      if (!changed) {
+        logger.warn('Could not find #selnumreg selector');
+        return false;
+      }
+
+      logger.info('Records per page set to 300, clicking ver button');
+
+      try {
+        await frame.click('#ver', { timeout: 5000 });
+      } catch (clickError) {
+        await frame.evaluate(() => {
+          const btn = document.querySelector('#ver');
+          if (btn) btn.click();
+        });
+      }
+
+      await this.page.waitForTimeout(3000);
+      try {
+        await frame.waitForSelector('table tbody tr td', { timeout: 15000 });
+        logger.debug('Table loaded after page size change');
+      } catch (_) {
+        logger.warn('Table not found after page size change, continuing anyway');
+      }
+      return true;
+    } catch (error) {
+      logger.warn('Failed to set max records per page', { error: error.message });
+      return false;
+    }
+  }
+
+  async goToNextTablePage(frame) {
+    try {
+      const clicked = await frame.evaluate(() => {
+        const links = document.querySelectorAll('a[href*="pageNum_registros"]');
+        for (const link of links) {
+          if (link.textContent.trim().includes('Siguiente')) {
+            link.click();
+            return true;
+          }
+        }
+        return false;
+      });
+
+      if (!clicked) {
+        logger.debug('No next page link available');
+        return false;
+      }
+
+      await this.page.waitForTimeout(3000);
+      try {
+        await frame.waitForSelector('table tbody tr td', { timeout: 15000 });
+        logger.debug('Table loaded after page navigation');
+      } catch (_) {
+        logger.warn('Table not found after page navigation, continuing anyway');
+      }
+      return true;
+    } catch (error) {
+      logger.warn('Failed to navigate to next table page', { error: error.message });
+      return false;
+    }
+  }
+
+  async searchDateInTable(frame, targetDate) {
+    return frame.evaluate((targetDate) => {
+      function extractDateParts(text) {
+        const isoMatch = text.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+        if (isoMatch) return { y: isoMatch[1], m: isoMatch[2].padStart(2, '0'), d: isoMatch[3].padStart(2, '0') };
+
+        const dmyMatch = text.match(/(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+        if (dmyMatch) return { y: dmyMatch[3], m: dmyMatch[2].padStart(2, '0'), d: dmyMatch[1].padStart(2, '0') };
+
+        return null;
+      }
+
+      const targetParts = extractDateParts(targetDate);
+      if (!targetParts) return { codCita: null, debug: { error: 'Could not parse targetDate', targetDate } };
+
+      const tbody = document.querySelector('#form1 > table > tbody > tr:nth-child(4) > td:nth-child(2) > table > tbody');
+
+      if (!tbody) {
+        const allTbodies = document.querySelectorAll('tbody');
+        const tables = document.querySelectorAll('table');
+        return {
+          codCita: null,
+          debug: {
+            error: 'Tbody not found with primary selector',
+            totalTables: tables.length,
+            totalTbodies: allTbodies.length,
+            bodySnippet: document.body?.innerHTML?.substring(0, 500) || 'empty'
+          }
+        };
+      }
+
+      const rows = tbody.querySelectorAll('tr');
+      const sampleCells = [];
+
+      for (let i = 0; i < rows.length && i < 5; i++) {
+        const cells = rows[i].querySelectorAll('td');
+        const rowTexts = [];
+        for (let j = 0; j < cells.length; j++) {
+          rowTexts.push(cells[j].textContent.trim());
+        }
+        sampleCells.push(rowTexts);
+      }
+
+      for (let i = 0; i < rows.length; i++) {
+        const cells = rows[i].querySelectorAll('td');
+        if (cells.length === 0) continue;
+
+        for (let j = 0; j < cells.length; j++) {
+          const cellText = cells[j].textContent.trim();
+          const cellParts = extractDateParts(cellText);
+
+          if (cellParts && cellParts.y === targetParts.y && cellParts.m === targetParts.m && cellParts.d === targetParts.d) {
+            const codCita = cells[0]?.textContent.trim() || null;
+            return { codCita, debug: { matched: true, cellText, row: i, col: j } };
+          }
+        }
+      }
+
+      return {
+        codCita: null,
+        debug: {
+          error: 'No matching date found in current page',
+          targetDate,
+          targetParts,
+          totalRows: rows.length,
+          sampleCells
+        }
+      };
+    }, targetDate);
+  }
+
   async filterAndExtractCodCita(fechaAtencion) {
     try {
       logger.debug('Filtering and extracting CodCita', { fechaAtencion });
 
       await this.page.waitForTimeout(1000);
 
-      // Get frame using page.frame() method
       let frame = this.page.frame({ name: 'contenido' });
-      
+
       if (!frame) {
         frame = this.page.frame({ url: /consultahistoriaclinica\.php/ });
       }
 
       if (!frame) {
         const frames = this.page.frames();
-        logger.error('Frame not found for filtering', { 
+        logger.error('Frame not found for filtering', {
           availableFrames: frames.map(f => ({ name: f.name(), url: f.url() }))
         });
         throw new Error('Could not find iframe for filtering');
@@ -559,77 +719,25 @@ export class RCBMonthlyScraper {
 
       await this.page.waitForTimeout(3000);
 
-      const result = await frame.evaluate((targetDate) => {
-        function extractDateParts(text) {
-          const isoMatch = text.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
-          if (isoMatch) return { y: isoMatch[1], m: isoMatch[2].padStart(2, '0'), d: isoMatch[3].padStart(2, '0') };
+      await this.setMaxRecordsPerPage(frame);
 
-          const dmyMatch = text.match(/(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
-          if (dmyMatch) return { y: dmyMatch[3], m: dmyMatch[2].padStart(2, '0'), d: dmyMatch[1].padStart(2, '0') };
+      const maxPages = 10;
+      let currentPage = 1;
 
-          return null;
-        }
+      let result = await this.searchDateInTable(frame, fechaAtencion);
 
-        const targetParts = extractDateParts(targetDate);
-        if (!targetParts) return { codCita: null, debug: { error: 'Could not parse targetDate', targetDate } };
+      while (!result.codCita && currentPage < maxPages) {
+        logger.debug('Date not found on page, trying next', { currentPage, fechaAtencion });
 
-        const tbody = document.querySelector('#form1 > table > tbody > tr:nth-child(4) > td:nth-child(2) > table > tbody');
+        const hasNext = await this.goToNextTablePage(frame);
+        if (!hasNext) break;
 
-        if (!tbody) {
-          const allTbodies = document.querySelectorAll('tbody');
-          const tables = document.querySelectorAll('table');
-          return {
-            codCita: null,
-            debug: {
-              error: 'Tbody not found with primary selector',
-              totalTables: tables.length,
-              totalTbodies: allTbodies.length,
-              bodySnippet: document.body?.innerHTML?.substring(0, 500) || 'empty'
-            }
-          };
-        }
-
-        const rows = tbody.querySelectorAll('tr');
-        const sampleCells = [];
-
-        for (let i = 0; i < rows.length && i < 5; i++) {
-          const cells = rows[i].querySelectorAll('td');
-          const rowTexts = [];
-          for (let j = 0; j < cells.length; j++) {
-            rowTexts.push(cells[j].textContent.trim());
-          }
-          sampleCells.push(rowTexts);
-        }
-
-        for (let i = 0; i < rows.length; i++) {
-          const cells = rows[i].querySelectorAll('td');
-          if (cells.length === 0) continue;
-
-          for (let j = 0; j < cells.length; j++) {
-            const cellText = cells[j].textContent.trim();
-            const cellParts = extractDateParts(cellText);
-
-            if (cellParts && cellParts.y === targetParts.y && cellParts.m === targetParts.m && cellParts.d === targetParts.d) {
-              const codCita = cells[0]?.textContent.trim() || null;
-              return { codCita, debug: { matched: true, cellText, row: i, col: j } };
-            }
-          }
-        }
-
-        return {
-          codCita: null,
-          debug: {
-            error: 'No matching date found',
-            targetDate,
-            targetParts,
-            totalRows: rows.length,
-            sampleCells
-          }
-        };
-      }, fechaAtencion);
+        currentPage++;
+        result = await this.searchDateInTable(frame, fechaAtencion);
+      }
 
       if (result.debug) {
-        logger.debug('filterAndExtractCodCita debug', result.debug);
+        logger.debug('filterAndExtractCodCita debug', { ...result.debug, pagesSearched: currentPage });
       }
 
       const codCita = result.codCita;
@@ -640,14 +748,14 @@ export class RCBMonthlyScraper {
           mkdirSync(screenshotDir, { recursive: true });
           const ssPath = join(screenshotDir, `codcita-debug-${Date.now()}.png`);
           await this.page.screenshot({ path: ssPath, fullPage: true });
-          logger.warn('CodCita not found - screenshot saved', { fechaAtencion, ssPath });
+          logger.warn('CodCita not found after searching all pages', { fechaAtencion, pagesSearched: currentPage, ssPath });
         } catch (ssErr) {
-          logger.warn('CodCita not found (screenshot failed)', { fechaAtencion });
+          logger.warn('CodCita not found (screenshot failed)', { fechaAtencion, pagesSearched: currentPage });
         }
         return null;
       }
 
-      logger.info('CodCita extracted successfully', { fechaAtencion, codCita });
+      logger.info('CodCita extracted successfully', { fechaAtencion, codCita, pageFound: currentPage });
       return codCita;
     } catch (error) {
       logger.error('Failed to extract CodCita', { fechaAtencion, error: error.message });
