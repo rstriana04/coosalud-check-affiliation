@@ -8,7 +8,7 @@ import { formatDate } from '@/lib/utils';
 export default function LogsViewer({ logs }) {
   const [filter, setFilter] = useState('all');
   const logsEndRef = useRef(null);
-  const [autoScroll, setAutoScroll] = useState(true);
+  const [autoScroll, setAutoScroll] = useState(false);
 
   useEffect(() => {
     if (autoScroll && logsEndRef.current) {
