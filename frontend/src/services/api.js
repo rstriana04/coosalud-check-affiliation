@@ -174,4 +174,25 @@ export const getCitologiasDownloadUrl = (jobId) => {
   return `${API_URL}/api/rcb-monthly/rcv-download/${jobId}`;
 };
 
+export const generateGestantesReport = async (file, email) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (email) formData.append('email', email);
+
+  const response = await api.post('/rcb-monthly/generate-gestantes', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 600000
+  });
+  return response.data;
+};
+
+export const getGestantesJobStatus = async (jobId) => {
+  const response = await api.get(`/rcb-monthly/rcv-status/${jobId}`);
+  return response.data;
+};
+
+export const getGestantesDownloadUrl = (jobId) => {
+  return `${API_URL}/api/rcb-monthly/rcv-download/${jobId}`;
+};
+
 export default api;

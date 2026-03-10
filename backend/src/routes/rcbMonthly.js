@@ -9,6 +9,7 @@ import { PediatricReportService } from '../services/pediatricReportService.js';
 import { LifecycleReportService } from '../services/lifecycleReportService.js';
 import { PlanificacionFamiliarReportService } from '../services/planificacionFamiliarReportService.js';
 import { CitologiasReportService } from '../services/citologiasReportService.js';
+import { GestantesReportService } from '../services/gestantesReportService.js';
 import { logger } from '../utils/logger.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { emitLog } from '../services/socketService.js';
@@ -259,6 +260,66 @@ router.post('/generate-citologias', upload.single('file'), async (req, res, next
     next(error);
   }
 });
+
+router.post('/generate-gestantes', upload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) {
+      throw new AppError('Se requiere un archivo Excel', 400);
+    }
+
+    const { email, limit } = req.body;
+    const filePath = req.file.path;
+    const parsedLimit = limit ? parseInt(limit, 10) : undefined;
+    const jobId = `gestantes-${Date.now()}`;
+
+    logger.info('Solicitud de generacion de informe gestantes', {
+      jobId, file: req.file.originalname,
+      email: email || 'none', limit: parsedLimit || 'all'
+    });
+
+    activeJobs.set(jobId, {
+      status: 'processing',
+      startedAt: new Date().toISOString(),
+      filename: req.file.originalname
+    });
+
+    processGestantesInBackground(jobId, filePath, email, parsedLimit);
+
+    res.json({ success: true, message: 'Procesamiento iniciado', jobId });
+  } catch (error) {
+    logger.error('Error en generacion de informe gestantes', { error: error.message });
+    next(error);
+  }
+});
+
+async function processGestantesInBackground(jobId, filePath, email, limit) {
+  try {
+    const service = new GestantesReportService();
+    const result = await service.generateFromExcel(filePath, { email, limit, jobId });
+
+    activeJobs.set(jobId, {
+      status: 'completed',
+      completedAt: new Date().toISOString(),
+      zipFilePath: result.zipFilePath,
+      excelFilePath: result.excelFilePath,
+      fileName: result.zipFilePath ? result.zipFilePath.split('/').pop() : null,
+      summary: result.summary,
+      results: result.results
+    });
+
+    emitLog('success', 'Procesamiento gestantes completado', { jobId });
+    logger.info('Background gestantes job completed', { jobId });
+  } catch (error) {
+    activeJobs.set(jobId, {
+      status: 'failed',
+      error: error.message,
+      failedAt: new Date().toISOString()
+    });
+
+    emitLog('error', `Procesamiento gestantes fallido: ${error.message}`, { jobId });
+    logger.error('Background gestantes job failed', { jobId, error: error.message });
+  }
+}
 
 async function processPlanFamiliarInBackground(jobId, filePath, email, limit) {
   try {

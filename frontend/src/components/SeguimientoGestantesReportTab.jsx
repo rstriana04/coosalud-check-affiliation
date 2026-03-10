@@ -3,13 +3,12 @@ import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/Card';
 import { Button } from './ui/Button';
 import { Badge } from './ui/Badge';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/Tabs';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow
 } from './ui/Table';
 import {
   FileText, Loader2, Upload, CheckCircle2,
-  XCircle, Download, Mail, HeartPulse, Baby, Users, Heart, Microscope, PersonStanding
+  XCircle, Download, Mail, Baby
 } from 'lucide-react';
 import ProgressBar from './ProgressBar';
 import LogsViewer from './LogsViewer';
@@ -17,73 +16,10 @@ import { useWebSocket } from '@/hooks/useWebSocket';
 import { useProgress } from '@/hooks/useProgress';
 import { db } from '@/services/db';
 import * as api from '@/services/api';
-import PediatricReportTab from './PediatricReportTab';
-import LifecycleReportTab from './LifecycleReportTab';
-import PlanificacionFamiliarReportTab from './PlanificacionFamiliarReportTab';
-import CitologiasReportTab from './CitologiasReportTab';
-import SeguimientoGestantesReportTab from './SeguimientoGestantesReportTab';
 
-const RCV_JOB_KEY = 'current_rcv_job';
+const GESTANTES_JOB_KEY = 'current_gestantes_job';
 
-export default function RCBMonthly() {
-  return (
-    <Tabs defaultValue="rcv" className="space-y-6">
-      <TabsList className="grid w-full grid-cols-6 max-w-5xl">
-        <TabsTrigger value="rcv">
-          <HeartPulse className="w-4 h-4 mr-2" />
-          Informe RCV
-        </TabsTrigger>
-        <TabsTrigger value="pediatric">
-          <Baby className="w-4 h-4 mr-2" />
-          Informe Pediatrico
-        </TabsTrigger>
-        <TabsTrigger value="lifecycle">
-          <Users className="w-4 h-4 mr-2" />
-          Ciclo de Vida
-        </TabsTrigger>
-        <TabsTrigger value="planificacion">
-          <Heart className="w-4 h-4 mr-2" />
-          Planificacion Familiar
-        </TabsTrigger>
-        <TabsTrigger value="citologias">
-          <Microscope className="w-4 h-4 mr-2" />
-          Citologias
-        </TabsTrigger>
-        <TabsTrigger value="gestantes">
-          <PersonStanding className="w-4 h-4 mr-2" />
-          Gestantes
-        </TabsTrigger>
-      </TabsList>
-
-      <TabsContent value="rcv">
-        <RCVReportTab />
-      </TabsContent>
-
-      <TabsContent value="pediatric">
-        <PediatricReportTab />
-      </TabsContent>
-
-      <TabsContent value="lifecycle">
-        <LifecycleReportTab />
-      </TabsContent>
-
-      <TabsContent value="planificacion">
-        <PlanificacionFamiliarReportTab />
-      </TabsContent>
-
-      <TabsContent value="citologias">
-        <CitologiasReportTab />
-      </TabsContent>
-
-      <TabsContent value="gestantes">
-        <SeguimientoGestantesReportTab />
-      </TabsContent>
-
-    </Tabs>
-  );
-}
-
-function RCVReportTab() {
+export default function SeguimientoGestantesReportTab() {
   const [file, setFile] = useState(null);
   const [email, setEmail] = useState('');
   const [useEmail, setUseEmail] = useState(false);
@@ -98,7 +34,7 @@ function RCVReportTab() {
 
   const handleWebSocketEvent = useCallback((event, data) => {
     const eventJobId = data?.jobId || data?.data?.jobId;
-    if (!eventJobId || !eventJobId.startsWith('rcv-')) return;
+    if (!eventJobId || !eventJobId.startsWith('gestantes-')) return;
 
     switch (event) {
       case 'job:progress':
@@ -112,12 +48,34 @@ function RCVReportTab() {
 
   const { isConnected } = useWebSocket(handleWebSocketEvent);
 
+  const handleJobCompleted = useCallback(async (completedJobId, status) => {
+    setIsProcessing(false);
+    setResult({
+      success: true,
+      summary: status.summary,
+      results: status.results || [],
+      jobId: completedJobId
+    });
+    updateProgress({
+      percentage: 100,
+      processed: status.summary?.total || 0
+    });
+    toast.success('Informe seguimiento gestantes generado', {
+      description: `${status.summary?.successful || 0} de ${status.summary?.total || 0} pacientes`
+    });
+  }, [updateProgress]);
+
+  const handleJobFailed = useCallback((errorMsg) => {
+    setIsProcessing(false);
+    toast.error('Error en el procesamiento', { description: errorMsg });
+  }, []);
+
   useEffect(() => {
     if (hasRestoredRef.current) return;
     hasRestoredRef.current = true;
 
     const restore = async () => {
-      const saved = await db.getJob(RCV_JOB_KEY);
+      const saved = await db.getJob(GESTANTES_JOB_KEY);
       if (!saved || !saved.jobId) return;
 
       setJobId(saved.jobId);
@@ -128,7 +86,7 @@ function RCVReportTab() {
 
       if (saved.isProcessing) {
         try {
-          const status = await api.getRCVJobStatus(saved.jobId);
+          const status = await api.getGestantesJobStatus(saved.jobId);
           if (status.status === 'completed') {
             handleJobCompleted(saved.jobId, status);
           } else if (status.status === 'failed') {
@@ -144,13 +102,9 @@ function RCVReportTab() {
             setJobId(null);
             setResult(null);
             reset();
-            await db.deleteJob(RCV_JOB_KEY);
+            await db.deleteJob(GESTANTES_JOB_KEY);
             toast.warning('El proceso anterior se perdio', {
               description: 'El servidor se reinicio. Puedes iniciar un nuevo proceso.'
-            });
-          } else {
-            toast.info('Sesion restaurada', {
-              description: 'Reconectando al procesamiento...'
             });
           }
         }
@@ -164,44 +118,18 @@ function RCVReportTab() {
     if (!jobId || !progress.total) return;
     const saveState = async () => {
       await db.saveJob({
-        jobId,
-        filename,
-        isProcessing,
-        progress,
-        result
-      }, RCV_JOB_KEY);
+        jobId, filename, isProcessing, progress, result
+      }, GESTANTES_JOB_KEY);
     };
     saveState();
   }, [jobId, progress, isProcessing, filename, result]);
-
-  const handleJobCompleted = useCallback(async (completedJobId, status) => {
-    setIsProcessing(false);
-    setResult({
-      success: true,
-      summary: status.summary,
-      results: status.results || [],
-      jobId: completedJobId
-    });
-    updateProgress({
-      percentage: 100,
-      processed: status.summary?.total || 0
-    });
-    toast.success('Informe RCV generado', {
-      description: `${status.summary?.successful || 0} de ${status.summary?.total || 0} pacientes`
-    });
-  }, [updateProgress]);
-
-  const handleJobFailed = useCallback((errorMsg) => {
-    setIsProcessing(false);
-    toast.error('Error en el procesamiento', { description: errorMsg });
-  }, []);
 
   useEffect(() => {
     if (!isProcessing || !jobId) return;
 
     const checkInterval = setInterval(async () => {
       try {
-        const status = await api.getRCVJobStatus(jobId);
+        const status = await api.getGestantesJobStatus(jobId);
         if (status.status === 'completed') {
           clearInterval(checkInterval);
           handleJobCompleted(jobId, status);
@@ -216,7 +144,7 @@ function RCVReportTab() {
           setJobId(null);
           setResult(null);
           reset();
-          db.deleteJob(RCV_JOB_KEY);
+          db.deleteJob(GESTANTES_JOB_KEY);
           toast.warning('El proceso se perdio', {
             description: 'El servidor se reinicio. Puedes iniciar un nuevo proceso.'
           });
@@ -240,15 +168,11 @@ function RCVReportTab() {
 
   const handleFileSelect = useCallback((e) => {
     const selected = e.target.files?.[0];
-    if (selected) {
-      setFile(selected);
-      setResult(null);
-    }
+    if (selected) { setFile(selected); setResult(null); }
   }, []);
 
   const handleGenerate = async () => {
     if (!file) return;
-
     reset();
     setIsProcessing(true);
     setResult(null);
@@ -256,8 +180,7 @@ function RCVReportTab() {
 
     try {
       const emailToSend = useEmail && email ? email : undefined;
-      const response = await api.generateRCVReport(file, emailToSend);
-
+      const response = await api.generateGestantesReport(file, emailToSend);
       if (response.jobId) {
         setJobId(response.jobId);
         toast.info('Procesamiento iniciado', {
@@ -275,7 +198,7 @@ function RCVReportTab() {
   const handleDownload = () => {
     const downloadJobId = result?.jobId || jobId;
     if (downloadJobId) {
-      window.open(api.getRCVDownloadUrl(downloadJobId), '_blank');
+      window.open(api.getGestantesDownloadUrl(downloadJobId), '_blank');
     }
   };
 
@@ -286,7 +209,7 @@ function RCVReportTab() {
     setResult(null);
     setIsProcessing(false);
     setFilename('');
-    await db.deleteJob(RCV_JOB_KEY);
+    await db.deleteJob(GESTANTES_JOB_KEY);
   };
 
   return (
@@ -294,8 +217,8 @@ function RCVReportTab() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <HeartPulse className="w-5 h-5 text-red-500" />
-            Generar Informe de Riesgo Cardiovascular
+            <Baby className="w-5 h-5 text-rose-500" />
+            Generar Informe Seguimiento Gestantes
             {isConnected && (
               <Badge variant="outline" className="ml-auto text-xs font-normal text-green-600 border-green-300">
                 Conectado
@@ -303,8 +226,10 @@ function RCVReportTab() {
             )}
           </CardTitle>
           <CardDescription>
-            Sube un archivo Excel con los pacientes a procesar. Columnas requeridas:
-            identipac, fecha_atencion, nombremedico. Opcional: programa.
+            Sube un archivo Excel con las gestantes a procesar. Columnas requeridas:
+            identipac, fecha_atencion, nombremedico. La columna programa debe tener:
+            seguimiento-gestantes. Nota: fecha_atencion corresponde a ULTIMA CITA DE
+            CONTROL (formatos: YYYY-MM-DD o DD-MM-YYYY).
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -346,7 +271,7 @@ function RCVReportTab() {
                 className="w-full sm:w-auto px-8"
               >
                 <FileText className="w-4 h-4 mr-2" />
-                Generar Informe RCV
+                Generar Informe Gestantes
               </Button>
             </>
           )}
@@ -366,9 +291,7 @@ function RCVReportTab() {
         </CardContent>
       </Card>
 
-      {isProcessing && progress.total > 0 && (
-        <ProgressBar progress={progress} />
-      )}
+      {isProcessing && progress.total > 0 && <ProgressBar progress={progress} />}
 
       {isProcessing && progress.total === 0 && (
         <Card>
@@ -382,63 +305,20 @@ function RCVReportTab() {
       )}
 
       {result && (
-        <RCVResults
+        <GestantesResults
           result={result}
           onDownload={handleDownload}
           hasJobId={!!(result?.jobId || jobId)}
         />
       )}
 
-      {(isProcessing || logs.length > 0) && (
-        <LogsViewer logs={logs} />
-      )}
+      {(isProcessing || logs.length > 0) && <LogsViewer logs={logs} />}
     </div>
   );
 }
 
-function FileDropzone({ file, fileInputRef, onDrop, onSelect }) {
-  return (
-    <div
-      onDrop={onDrop}
-      onDragOver={(e) => e.preventDefault()}
-      onClick={() => fileInputRef.current?.click()}
-      className={`
-        border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors
-        ${file ? 'border-green-400 bg-green-50' : 'border-gray-300 hover:border-primary hover:bg-gray-50'}
-      `}
-    >
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".xlsx,.xls"
-        onChange={onSelect}
-        className="hidden"
-      />
-      {file ? (
-        <div className="flex items-center justify-center gap-3">
-          <CheckCircle2 className="w-8 h-8 text-green-500" />
-          <div className="text-left">
-            <p className="font-medium text-green-700">{file.name}</p>
-            <p className="text-sm text-green-600">
-              {(file.size / 1024).toFixed(1)} KB
-            </p>
-          </div>
-        </div>
-      ) : (
-        <div>
-          <Upload className="w-10 h-10 mx-auto text-gray-400 mb-3" />
-          <p className="font-medium text-gray-700">Arrastra tu archivo Excel aqui</p>
-          <p className="text-sm text-gray-500 mt-1">o haz clic para seleccionar</p>
-          <p className="text-xs text-gray-400 mt-2">Formatos: .xlsx, .xls</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function RCVResults({ result, onDownload, hasJobId }) {
+function GestantesResults({ result, onDownload, hasJobId }) {
   if (!result) return null;
-
   const { summary, results } = result;
 
   return (
@@ -500,6 +380,46 @@ function RCVResults({ result, onDownload, hasJobId }) {
           )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function FileDropzone({ file, fileInputRef, onDrop, onSelect }) {
+  return (
+    <div
+      onDrop={onDrop}
+      onDragOver={(e) => e.preventDefault()}
+      onClick={() => fileInputRef.current?.click()}
+      className={`
+        border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors
+        ${file ? 'border-green-400 bg-green-50' : 'border-gray-300 hover:border-primary hover:bg-gray-50'}
+      `}
+    >
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".xlsx,.xls"
+        onChange={onSelect}
+        className="hidden"
+      />
+      {file ? (
+        <div className="flex items-center justify-center gap-3">
+          <CheckCircle2 className="w-8 h-8 text-green-500" />
+          <div className="text-left">
+            <p className="font-medium text-green-700">{file.name}</p>
+            <p className="text-sm text-green-600">
+              {(file.size / 1024).toFixed(1)} KB
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div>
+          <Upload className="w-10 h-10 mx-auto text-gray-400 mb-3" />
+          <p className="font-medium text-gray-700">Arrastra tu archivo Excel aqui</p>
+          <p className="text-sm text-gray-500 mt-1">o haz clic para seleccionar</p>
+          <p className="text-xs text-gray-400 mt-2">Formatos: .xlsx, .xls</p>
+        </div>
+      )}
     </div>
   );
 }

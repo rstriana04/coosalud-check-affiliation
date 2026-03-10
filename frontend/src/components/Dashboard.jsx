@@ -362,7 +362,7 @@ export default function Dashboard() {
               variant={activeView === 'rcb-monthly' ? 'default' : 'outline'}
               onClick={() => setActiveView('rcb-monthly')}
             >
-              RCB Mensual
+              Informes 202
             </Button>
           </div>
         </div>

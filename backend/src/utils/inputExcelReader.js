@@ -97,5 +97,8 @@ function normalizeDate(raw) {
   const dmyMatch = str.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
   if (dmyMatch) return `${dmyMatch[3]}-${dmyMatch[2]}-${dmyMatch[1]}`;
 
+  const dmyDashMatch = str.match(/^(\d{2})-(\d{2})-(\d{4})/);
+  if (dmyDashMatch) return `${dmyDashMatch[3]}-${dmyDashMatch[2]}-${dmyDashMatch[1]}`;
+
   return null;
 }
