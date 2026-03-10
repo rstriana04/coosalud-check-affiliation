@@ -3,13 +3,12 @@ import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/Card';
 import { Button } from './ui/Button';
 import { Badge } from './ui/Badge';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/Tabs';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow
 } from './ui/Table';
 import {
-  Calendar, FileText, Loader2, Upload, CheckCircle2,
-  XCircle, Download, Mail, HeartPulse, ClipboardList, Baby, Users
+  FileText, Loader2, Upload, CheckCircle2,
+  XCircle, Download, Mail, Users
 } from 'lucide-react';
 import ProgressBar from './ProgressBar';
 import LogsViewer from './LogsViewer';
@@ -17,53 +16,10 @@ import { useWebSocket } from '@/hooks/useWebSocket';
 import { useProgress } from '@/hooks/useProgress';
 import { db } from '@/services/db';
 import * as api from '@/services/api';
-import PediatricReportTab from './PediatricReportTab';
-import LifecycleReportTab from './LifecycleReportTab';
 
-const RCV_JOB_KEY = 'current_rcv_job';
+const LIFECYCLE_JOB_KEY = 'current_lifecycle_job';
 
-export default function RCBMonthly() {
-  return (
-    <Tabs defaultValue="rcv" className="space-y-6">
-      <TabsList className="grid w-full grid-cols-4 max-w-3xl">
-        <TabsTrigger value="rcv">
-          <HeartPulse className="w-4 h-4 mr-2" />
-          Informe RCV
-        </TabsTrigger>
-        <TabsTrigger value="pediatric">
-          <Baby className="w-4 h-4 mr-2" />
-          Informe Pediatrico
-        </TabsTrigger>
-        <TabsTrigger value="lifecycle">
-          <Users className="w-4 h-4 mr-2" />
-          Ciclo de Vida
-        </TabsTrigger>
-        <TabsTrigger value="monthly">
-          <ClipboardList className="w-4 h-4 mr-2" />
-          Reporte Mensual
-        </TabsTrigger>
-      </TabsList>
-
-      <TabsContent value="rcv">
-        <RCVReportTab />
-      </TabsContent>
-
-      <TabsContent value="pediatric">
-        <PediatricReportTab />
-      </TabsContent>
-
-      <TabsContent value="lifecycle">
-        <LifecycleReportTab />
-      </TabsContent>
-
-      <TabsContent value="monthly">
-        <MonthlyReportTab />
-      </TabsContent>
-    </Tabs>
-  );
-}
-
-function RCVReportTab() {
+export default function LifecycleReportTab() {
   const [file, setFile] = useState(null);
   const [email, setEmail] = useState('');
   const [useEmail, setUseEmail] = useState(false);
@@ -78,7 +34,7 @@ function RCVReportTab() {
 
   const handleWebSocketEvent = useCallback((event, data) => {
     const eventJobId = data?.jobId || data?.data?.jobId;
-    if (!eventJobId || !eventJobId.startsWith('rcv-')) return;
+    if (!eventJobId || !eventJobId.startsWith('lifecycle-')) return;
 
     switch (event) {
       case 'job:progress':
@@ -92,12 +48,34 @@ function RCVReportTab() {
 
   const { isConnected } = useWebSocket(handleWebSocketEvent);
 
+  const handleJobCompleted = useCallback(async (completedJobId, status) => {
+    setIsProcessing(false);
+    setResult({
+      success: true,
+      summary: status.summary,
+      results: status.results || [],
+      jobId: completedJobId
+    });
+    updateProgress({
+      percentage: 100,
+      processed: status.summary?.total || 0
+    });
+    toast.success('Informe ciclo de vida generado', {
+      description: `${status.summary?.successful || 0} de ${status.summary?.total || 0} pacientes`
+    });
+  }, [updateProgress]);
+
+  const handleJobFailed = useCallback((errorMsg) => {
+    setIsProcessing(false);
+    toast.error('Error en el procesamiento', { description: errorMsg });
+  }, []);
+
   useEffect(() => {
     if (hasRestoredRef.current) return;
     hasRestoredRef.current = true;
 
     const restore = async () => {
-      const saved = await db.getJob(RCV_JOB_KEY);
+      const saved = await db.getJob(LIFECYCLE_JOB_KEY);
       if (!saved || !saved.jobId) return;
 
       setJobId(saved.jobId);
@@ -108,7 +86,7 @@ function RCVReportTab() {
 
       if (saved.isProcessing) {
         try {
-          const status = await api.getRCVJobStatus(saved.jobId);
+          const status = await api.getLifecycleJobStatus(saved.jobId);
           if (status.status === 'completed') {
             handleJobCompleted(saved.jobId, status);
           } else if (status.status === 'failed') {
@@ -124,13 +102,9 @@ function RCVReportTab() {
             setJobId(null);
             setResult(null);
             reset();
-            await db.deleteJob(RCV_JOB_KEY);
+            await db.deleteJob(LIFECYCLE_JOB_KEY);
             toast.warning('El proceso anterior se perdio', {
               description: 'El servidor se reinicio. Puedes iniciar un nuevo proceso.'
-            });
-          } else {
-            toast.info('Sesion restaurada', {
-              description: 'Reconectando al procesamiento...'
             });
           }
         }
@@ -144,44 +118,18 @@ function RCVReportTab() {
     if (!jobId || !progress.total) return;
     const saveState = async () => {
       await db.saveJob({
-        jobId,
-        filename,
-        isProcessing,
-        progress,
-        result
-      }, RCV_JOB_KEY);
+        jobId, filename, isProcessing, progress, result
+      }, LIFECYCLE_JOB_KEY);
     };
     saveState();
   }, [jobId, progress, isProcessing, filename, result]);
-
-  const handleJobCompleted = useCallback(async (completedJobId, status) => {
-    setIsProcessing(false);
-    setResult({
-      success: true,
-      summary: status.summary,
-      results: status.results || [],
-      jobId: completedJobId
-    });
-    updateProgress({
-      percentage: 100,
-      processed: status.summary?.total || 0
-    });
-    toast.success('Informe RCV generado', {
-      description: `${status.summary?.successful || 0} de ${status.summary?.total || 0} pacientes`
-    });
-  }, [updateProgress]);
-
-  const handleJobFailed = useCallback((errorMsg) => {
-    setIsProcessing(false);
-    toast.error('Error en el procesamiento', { description: errorMsg });
-  }, []);
 
   useEffect(() => {
     if (!isProcessing || !jobId) return;
 
     const checkInterval = setInterval(async () => {
       try {
-        const status = await api.getRCVJobStatus(jobId);
+        const status = await api.getLifecycleJobStatus(jobId);
         if (status.status === 'completed') {
           clearInterval(checkInterval);
           handleJobCompleted(jobId, status);
@@ -196,7 +144,7 @@ function RCVReportTab() {
           setJobId(null);
           setResult(null);
           reset();
-          db.deleteJob(RCV_JOB_KEY);
+          db.deleteJob(LIFECYCLE_JOB_KEY);
           toast.warning('El proceso se perdio', {
             description: 'El servidor se reinicio. Puedes iniciar un nuevo proceso.'
           });
@@ -220,15 +168,11 @@ function RCVReportTab() {
 
   const handleFileSelect = useCallback((e) => {
     const selected = e.target.files?.[0];
-    if (selected) {
-      setFile(selected);
-      setResult(null);
-    }
+    if (selected) { setFile(selected); setResult(null); }
   }, []);
 
   const handleGenerate = async () => {
     if (!file) return;
-
     reset();
     setIsProcessing(true);
     setResult(null);
@@ -236,8 +180,7 @@ function RCVReportTab() {
 
     try {
       const emailToSend = useEmail && email ? email : undefined;
-      const response = await api.generateRCVReport(file, emailToSend);
-
+      const response = await api.generateLifecycleReport(file, emailToSend);
       if (response.jobId) {
         setJobId(response.jobId);
         toast.info('Procesamiento iniciado', {
@@ -255,7 +198,7 @@ function RCVReportTab() {
   const handleDownload = () => {
     const downloadJobId = result?.jobId || jobId;
     if (downloadJobId) {
-      window.open(api.getRCVDownloadUrl(downloadJobId), '_blank');
+      window.open(api.getLifecycleDownloadUrl(downloadJobId), '_blank');
     }
   };
 
@@ -266,7 +209,7 @@ function RCVReportTab() {
     setResult(null);
     setIsProcessing(false);
     setFilename('');
-    await db.deleteJob(RCV_JOB_KEY);
+    await db.deleteJob(LIFECYCLE_JOB_KEY);
   };
 
   return (
@@ -274,8 +217,8 @@ function RCVReportTab() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <HeartPulse className="w-5 h-5 text-red-500" />
-            Generar Informe de Riesgo Cardiovascular
+            <Users className="w-5 h-5 text-purple-500" />
+            Generar Informe Ciclo de Vida
             {isConnected && (
               <Badge variant="outline" className="ml-auto text-xs font-normal text-green-600 border-green-300">
                 Conectado
@@ -284,7 +227,8 @@ function RCVReportTab() {
           </CardTitle>
           <CardDescription>
             Sube un archivo Excel con los pacientes a procesar. Columnas requeridas:
-            identipac, fecha_atencion, nombremedico. Opcional: programa.
+            identipac, fecha_atencion, nombremedico. La columna programa debe tener:
+            juventud, adultez o vejez.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -326,7 +270,7 @@ function RCVReportTab() {
                 className="w-full sm:w-auto px-8"
               >
                 <FileText className="w-4 h-4 mr-2" />
-                Generar Informe RCV
+                Generar Informe Ciclo de Vida
               </Button>
             </>
           )}
@@ -346,9 +290,7 @@ function RCVReportTab() {
         </CardContent>
       </Card>
 
-      {isProcessing && progress.total > 0 && (
-        <ProgressBar progress={progress} />
-      )}
+      {isProcessing && progress.total > 0 && <ProgressBar progress={progress} />}
 
       {isProcessing && progress.total === 0 && (
         <Card>
@@ -362,16 +304,85 @@ function RCVReportTab() {
       )}
 
       {result && (
-        <RCVResults
+        <LifecycleResults
           result={result}
           onDownload={handleDownload}
           hasJobId={!!(result?.jobId || jobId)}
         />
       )}
 
-      {(isProcessing || logs.length > 0) && (
-        <LogsViewer logs={logs} />
-      )}
+      {(isProcessing || logs.length > 0) && <LogsViewer logs={logs} />}
+    </div>
+  );
+}
+
+function LifecycleResults({ result, onDownload, hasJobId }) {
+  if (!result) return null;
+  const { summary, results } = result;
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
+            <span>Resultado del Procesamiento</span>
+            {hasJobId && (
+              <Button size="sm" onClick={onDownload}>
+                <Download className="w-4 h-4 mr-2" />
+                Descargar ZIP
+              </Button>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-3 gap-4 mb-6">
+            <SummaryCard label="Total" value={summary?.total || 0} color="text-gray-900" />
+            <SummaryCard label="Exitosos" value={summary?.successful || 0} color="text-green-600" />
+            <SummaryCard label="Fallidos" value={summary?.failed || 0} color="text-red-600" />
+          </div>
+
+          {results && results.length > 0 && (
+            <div className="rounded-md border max-h-96 overflow-y-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>#</TableHead>
+                    <TableHead>Identificacion</TableHead>
+                    <TableHead>Programa</TableHead>
+                    <TableHead>Fecha Atencion</TableHead>
+                    <TableHead>Estado</TableHead>
+                    <TableHead>Detalle</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {results.map((r, i) => (
+                    <TableRow key={i}>
+                      <TableCell>{i + 1}</TableCell>
+                      <TableCell className="font-mono">{r.identipac}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline">{r.programa || '\u2014'}</Badge>
+                      </TableCell>
+                      <TableCell>{r.fecha}</TableCell>
+                      <TableCell>
+                        <Badge variant={r.status === 'success' ? 'default' : 'destructive'}>
+                          {r.status === 'success' ? (
+                            <><CheckCircle2 className="w-3 h-3 mr-1" /> Exitoso</>
+                          ) : (
+                            <><XCircle className="w-3 h-3 mr-1" /> Fallido</>
+                          )}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm text-gray-500 max-w-xs truncate">
+                        {r.error || '\u2014'}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -416,220 +427,11 @@ function FileDropzone({ file, fileInputRef, onDrop, onSelect }) {
   );
 }
 
-function RCVResults({ result, onDownload, hasJobId }) {
-  if (!result) return null;
-
-  const { summary, results } = result;
-
-  return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            <span>Resultado del Procesamiento</span>
-            {hasJobId && (
-              <Button size="sm" onClick={onDownload}>
-                <Download className="w-4 h-4 mr-2" />
-                Descargar ZIP
-              </Button>
-            )}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-3 gap-4 mb-6">
-            <SummaryCard label="Total" value={summary?.total || 0} color="text-gray-900" />
-            <SummaryCard label="Exitosos" value={summary?.successful || 0} color="text-green-600" />
-            <SummaryCard label="Fallidos" value={summary?.failed || 0} color="text-red-600" />
-          </div>
-
-          {results && results.length > 0 && (
-            <div className="rounded-md border max-h-96 overflow-y-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>#</TableHead>
-                    <TableHead>Identificacion</TableHead>
-                    <TableHead>Fecha Atencion</TableHead>
-                    <TableHead>Estado</TableHead>
-                    <TableHead>Detalle</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {results.map((r, i) => (
-                    <TableRow key={i}>
-                      <TableCell>{i + 1}</TableCell>
-                      <TableCell className="font-mono">{r.identipac}</TableCell>
-                      <TableCell>{r.fecha}</TableCell>
-                      <TableCell>
-                        <Badge variant={r.status === 'success' ? 'default' : 'destructive'}>
-                          {r.status === 'success' ? (
-                            <><CheckCircle2 className="w-3 h-3 mr-1" /> Exitoso</>
-                          ) : (
-                            <><XCircle className="w-3 h-3 mr-1" /> Fallido</>
-                          )}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-sm text-gray-500 max-w-xs truncate">
-                        {r.error || '\u2014'}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
 function SummaryCard({ label, value, color }) {
   return (
     <div className="rounded-lg border bg-gray-50 p-4 text-center">
       <p className="text-sm text-gray-500">{label}</p>
       <p className={`text-3xl font-bold ${color}`}>{value}</p>
-    </div>
-  );
-}
-
-function MonthlyReportTab() {
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [reportData, setReportData] = useState([]);
-  const [isGenerating, setIsGenerating] = useState(false);
-
-  const handleGenerateReport = async () => {
-    try {
-      setIsGenerating(true);
-      toast.loading('Generando informe...', {
-        id: 'rcb-report',
-        description: 'Este proceso puede tomar varios minutos'
-      });
-
-      const response = await api.generateRCBMonthlyReport(startDate, endDate);
-
-      toast.success('Informe generado exitosamente', {
-        id: 'rcb-report',
-        description: 'El archivo ha sido descargado'
-      });
-
-      console.log('Report generated:', response);
-    } catch (error) {
-      toast.error('Error al generar informe', {
-        id: 'rcb-report',
-        description: error.response?.data?.message || error.message
-      });
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <FileText className="w-5 h-5" />
-            Reporte Mensual por Rango de Fechas
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-end gap-4">
-            <div className="flex-1">
-              <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 mb-2">
-                Fecha desde
-              </label>
-              <div className="relative">
-                <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <input
-                  id="startDate"
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
-                />
-              </div>
-            </div>
-
-            <div className="flex-1">
-              <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 mb-2">
-                Fecha hasta
-              </label>
-              <div className="relative">
-                <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <input
-                  id="endDate"
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
-                />
-              </div>
-            </div>
-
-            <Button
-              onClick={handleGenerateReport}
-              disabled={!startDate || !endDate || isGenerating}
-              className="px-6"
-            >
-              {isGenerating ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Generando...
-                </>
-              ) : (
-                <>
-                  <FileText className="w-4 h-4 mr-2" />
-                  Generar informe
-                </>
-              )}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Resultados del Informe</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>#</TableHead>
-                  <TableHead>Tipo Doc</TableHead>
-                  <TableHead>Numero Documento</TableHead>
-                  <TableHead>Fecha Afiliacion</TableHead>
-                  <TableHead>Estado</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {reportData.length > 0 ? (
-                  reportData.map((row, index) => (
-                    <TableRow key={index}>
-                      <TableCell>{index + 1}</TableCell>
-                      <TableCell>{row.tipoDocumento}</TableCell>
-                      <TableCell>{row.numeroDocumento}</TableCell>
-                      <TableCell>{row.fechaAfiliacion}</TableCell>
-                      <TableCell>{row.estado}</TableCell>
-                    </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={5} className="h-24 text-center">
-                      <div className="text-gray-500">
-                        No hay datos para mostrar. Selecciona un rango de fechas y genera el informe.
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }

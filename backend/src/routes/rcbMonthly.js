@@ -6,6 +6,7 @@ import { mkdirSync, createReadStream, statSync } from 'fs';
 import { RCBMonthlyScraper } from '../services/rcbMonthlyService.js';
 import { RCVReportService } from '../services/rcvReportService.js';
 import { PediatricReportService } from '../services/pediatricReportService.js';
+import { LifecycleReportService } from '../services/lifecycleReportService.js';
 import { logger } from '../utils/logger.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { emitLog } from '../services/socketService.js';
@@ -163,6 +164,66 @@ router.post('/generate-pediatric', upload.single('file'), async (req, res, next)
     next(error);
   }
 });
+
+router.post('/generate-lifecycle', upload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) {
+      throw new AppError('Se requiere un archivo Excel', 400);
+    }
+
+    const { email, limit } = req.body;
+    const filePath = req.file.path;
+    const parsedLimit = limit ? parseInt(limit, 10) : undefined;
+    const jobId = `lifecycle-${Date.now()}`;
+
+    logger.info('Solicitud de generacion de informe ciclo de vida', {
+      jobId, file: req.file.originalname,
+      email: email || 'none', limit: parsedLimit || 'all'
+    });
+
+    activeJobs.set(jobId, {
+      status: 'processing',
+      startedAt: new Date().toISOString(),
+      filename: req.file.originalname
+    });
+
+    processLifecycleInBackground(jobId, filePath, email, parsedLimit);
+
+    res.json({ success: true, message: 'Procesamiento iniciado', jobId });
+  } catch (error) {
+    logger.error('Error en generacion de informe ciclo de vida', { error: error.message });
+    next(error);
+  }
+});
+
+async function processLifecycleInBackground(jobId, filePath, email, limit) {
+  try {
+    const service = new LifecycleReportService();
+    const result = await service.generateFromExcel(filePath, { email, limit, jobId });
+
+    activeJobs.set(jobId, {
+      status: 'completed',
+      completedAt: new Date().toISOString(),
+      zipFilePath: result.zipFilePath,
+      excelFilePath: result.excelFilePath,
+      fileName: result.zipFilePath ? result.zipFilePath.split('/').pop() : null,
+      summary: result.summary,
+      results: result.results
+    });
+
+    emitLog('success', 'Procesamiento ciclo de vida completado', { jobId });
+    logger.info('Background lifecycle job completed', { jobId });
+  } catch (error) {
+    activeJobs.set(jobId, {
+      status: 'failed',
+      error: error.message,
+      failedAt: new Date().toISOString()
+    });
+
+    emitLog('error', `Procesamiento ciclo de vida fallido: ${error.message}`, { jobId });
+    logger.error('Background lifecycle job failed', { jobId, error: error.message });
+  }
+}
 
 async function processPediatricInBackground(jobId, filePath, email, limit) {
   try {
