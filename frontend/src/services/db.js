@@ -63,7 +63,7 @@ class DatabaseService {
     return this.initPromise;
   }
 
-  async saveJob(jobData) {
+  async saveJob(jobData, jobKey = 'current_job') {
     try {
       const db = await this.initialize();
 
@@ -75,9 +75,9 @@ class DatabaseService {
         try {
           const transaction = db.transaction([STORE_NAME], 'readwrite');
           const store = transaction.objectStore(STORE_NAME);
-          
+
           const data = {
-            id: 'current_job',
+            id: jobKey,
             ...jobData,
             timestamp: new Date().toISOString()
           };
@@ -114,7 +114,7 @@ class DatabaseService {
     }
   }
 
-  async getJob() {
+  async getJob(jobKey = 'current_job') {
     try {
       const db = await this.initialize();
 
@@ -126,7 +126,7 @@ class DatabaseService {
         try {
           const transaction = db.transaction([STORE_NAME], 'readonly');
           const store = transaction.objectStore(STORE_NAME);
-          const request = store.get('current_job');
+          const request = store.get(jobKey);
 
           request.onsuccess = () => {
             const job = request.result;
@@ -164,7 +164,7 @@ class DatabaseService {
     }
   }
 
-  async deleteJob() {
+  async deleteJob(jobKey = 'current_job') {
     try {
       const db = await this.initialize();
 
@@ -177,7 +177,7 @@ class DatabaseService {
         try {
           const transaction = db.transaction([STORE_NAME], 'readwrite');
           const store = transaction.objectStore(STORE_NAME);
-          const request = store.delete('current_job');
+          const request = store.delete(jobKey);
 
           request.onsuccess = () => {
             console.log('[IndexedDB] Job deleted successfully');

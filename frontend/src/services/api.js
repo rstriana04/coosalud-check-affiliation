@@ -61,4 +61,142 @@ export const deleteJob = async (jobId) => {
   return response.data;
 };
 
+export const getTemplateDownloadUrl = (module) => {
+  return `${API_URL}/api/rcb-monthly/template/${module}`;
+};
+
+export const generateRCBMonthlyReport = async (startDate, endDate) => {
+  const response = await api.post('/rcb-monthly/generate', {
+    startDate,
+    endDate
+  });
+  return response.data;
+};
+
+export const generateRCVReport = async (file, email) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (email) formData.append('email', email);
+
+  const response = await api.post('/rcb-monthly/generate-rcv', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 600000
+  });
+  return response.data;
+};
+
+export const getRCVJobStatus = async (jobId) => {
+  const response = await api.get(`/rcb-monthly/rcv-status/${jobId}`);
+  return response.data;
+};
+
+export const getRCVDownloadUrl = (jobId) => {
+  return `${API_URL}/api/rcb-monthly/rcv-download/${jobId}`;
+};
+
+export const generatePediatricReport = async (file, email) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (email) formData.append('email', email);
+
+  const response = await api.post('/rcb-monthly/generate-pediatric', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 600000
+  });
+  return response.data;
+};
+
+export const getPediatricJobStatus = async (jobId) => {
+  const response = await api.get(`/rcb-monthly/rcv-status/${jobId}`);
+  return response.data;
+};
+
+export const getPediatricDownloadUrl = (jobId) => {
+  return `${API_URL}/api/rcb-monthly/rcv-download/${jobId}`;
+};
+
+export const generateLifecycleReport = async (file, email) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (email) formData.append('email', email);
+
+  const response = await api.post('/rcb-monthly/generate-lifecycle', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 600000
+  });
+  return response.data;
+};
+
+export const getLifecycleJobStatus = async (jobId) => {
+  const response = await api.get(`/rcb-monthly/rcv-status/${jobId}`);
+  return response.data;
+};
+
+export const getLifecycleDownloadUrl = (jobId) => {
+  return `${API_URL}/api/rcb-monthly/rcv-download/${jobId}`;
+};
+
+export const generatePlanFamiliarReport = async (file, email) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (email) formData.append('email', email);
+
+  const response = await api.post('/rcb-monthly/generate-planificacion-familiar', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 600000
+  });
+  return response.data;
+};
+
+export const getPlanFamiliarJobStatus = async (jobId) => {
+  const response = await api.get(`/rcb-monthly/rcv-status/${jobId}`);
+  return response.data;
+};
+
+export const getPlanFamiliarDownloadUrl = (jobId) => {
+  return `${API_URL}/api/rcb-monthly/rcv-download/${jobId}`;
+};
+
+export const generateCitologiasReport = async (file, email) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (email) formData.append('email', email);
+
+  const response = await api.post('/rcb-monthly/generate-citologias', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 600000
+  });
+  return response.data;
+};
+
+export const getCitologiasJobStatus = async (jobId) => {
+  const response = await api.get(`/rcb-monthly/rcv-status/${jobId}`);
+  return response.data;
+};
+
+export const getCitologiasDownloadUrl = (jobId) => {
+  return `${API_URL}/api/rcb-monthly/rcv-download/${jobId}`;
+};
+
+export const generateGestantesReport = async (file, email) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (email) formData.append('email', email);
+
+  const response = await api.post('/rcb-monthly/generate-gestantes', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 600000
+  });
+  return response.data;
+};
+
+export const getGestantesJobStatus = async (jobId) => {
+  const response = await api.get(`/rcb-monthly/rcv-status/${jobId}`);
+  return response.data;
+};
+
+export const getGestantesDownloadUrl = (jobId) => {
+  return `${API_URL}/api/rcb-monthly/rcv-download/${jobId}`;
+};
+
 export default api;

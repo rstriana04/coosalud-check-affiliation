@@ -10,6 +10,7 @@ import ProgressBar from './ProgressBar';
 import RecordsTable from './RecordsTable';
 import LogsViewer from './LogsViewer';
 import JobHistory from './JobHistory';
+import RCBMonthly from './RCBMonthly';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useProgress } from '@/hooks/useProgress';
 import { useJobPersistence } from '@/hooks/useJobPersistence';
@@ -17,6 +18,7 @@ import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import * as api from '@/services/api';
 
 export default function Dashboard() {
+  const [activeView, setActiveView] = useState('automation');
   const [jobId, setJobId] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -348,12 +350,29 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
+          
+          <div className="mt-4 flex gap-2">
+            <Button
+              variant={activeView === 'automation' ? 'default' : 'outline'}
+              onClick={() => setActiveView('automation')}
+            >
+              Automatización
+            </Button>
+            <Button
+              variant={activeView === 'rcb-monthly' ? 'default' : 'outline'}
+              onClick={() => setActiveView('rcb-monthly')}
+            >
+              Informes 202
+            </Button>
+          </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="space-y-6">
-          {!jobId ? (
+          {activeView === 'rcb-monthly' ? (
+            <RCBMonthly />
+          ) : !jobId ? (
             <>
               <Card>
                 <CardHeader>

@@ -8,6 +8,10 @@ build/
 .DS_Store
 Thumbs.db
 
+pdfs/
+processed/
+downloads/
+
 progress/
 
 uploads/
@@ -25,4 +29,6 @@ playwright-report/
 test-results/
 
 redis-data/
+
+backend/data/
 
