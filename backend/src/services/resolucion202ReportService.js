@@ -38,7 +38,7 @@ export class Resolucion202ReportService {
 
     logger.info('Generating Resolucion 202 report from database', { reportingPeriod });
 
-    const rawRecords = databaseService.getPatientsByPeriod(reportingPeriod);
+    const rawRecords = await databaseService.getPatientsByPeriod(reportingPeriod);
 
     if (rawRecords.length === 0) {
       throw new Error(`No patient records found for period ${reportingPeriod}`);

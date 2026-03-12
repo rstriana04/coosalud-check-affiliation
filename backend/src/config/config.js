@@ -58,6 +58,11 @@ export const config = {
     customLlmModel: process.env.CUSTOM_LLM_MODEL || ''
   },
 
+  supabase: {
+    url: process.env.SUPABASE_URL || '',
+    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+  },
+
   email: {
     apiKey: process.env.RESEND_API_KEY || '',
     from: process.env.EMAIL_FROM || 'ADRES Automation <noreply@resend.dev>'

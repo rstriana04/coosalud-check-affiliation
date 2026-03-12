@@ -1,137 +1,121 @@
-import Database from 'better-sqlite3';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
-import { mkdirSync } from 'fs';
+import { createClient } from '@supabase/supabase-js';
+import { config } from '../config/config.js';
 import { logger } from '../utils/logger.js';
 import {
-  buildCreateTableSQL,
-  buildUpsertSQL,
   getColumnNames,
   isNonDefaultValue,
   getDefaultForColumn,
 } from '../utils/resolucion202Schema.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const DB_DIR = join(__dirname, '../../data');
-const DB_PATH = join(DB_DIR, 'resolucion202.db');
+const TABLE_NAME = 'patient_records';
 
 class DatabaseService {
   constructor() {
-    mkdirSync(DB_DIR, { recursive: true });
-    this.db = new Database(DB_PATH);
-    this.db.pragma('journal_mode = WAL');
-    this.db.pragma('foreign_keys = ON');
-    this.initialize();
-    logger.info('SQLite database initialized', { path: DB_PATH });
+    this.supabase = createClient(
+      config.supabase.url,
+      config.supabase.serviceRoleKey
+    );
+    logger.info('Supabase client initialized', { url: config.supabase.url });
   }
 
-  initialize() {
-    this.db.exec(buildCreateTableSQL());
-    this.db.exec(buildIndexes());
-  }
+  async upsertPatientRecord(record) {
+    const row = buildRow(record);
+    const { error } = await this.supabase
+      .from(TABLE_NAME)
+      .upsert(row, { onConflict: 'numero_identificacion,reporting_period,source_program' });
 
-  upsertPatientRecord(record) {
-    const params = buildParams(record);
-    try {
-      const stmt = this.db.prepare(buildUpsertSQL());
-      return stmt.run(params);
-    } catch (error) {
+    if (error) {
       throw new Error(`Failed to upsert patient ${record.numero_identificacion}: ${error.message}`);
     }
   }
 
-  upsertBatch(records) {
-    const stmt = this.db.prepare(buildUpsertSQL());
-    const transaction = this.db.transaction((rows) => {
-      for (const record of rows) {
-        stmt.run(buildParams(record));
-      }
-    });
-    try {
-      transaction(records);
-      logger.info('Batch upsert completed', { count: records.length });
-    } catch (error) {
+  async upsertBatch(records) {
+    const rows = records.map(buildRow);
+    const { error } = await this.supabase
+      .from(TABLE_NAME)
+      .upsert(rows, { onConflict: 'numero_identificacion,reporting_period,source_program' });
+
+    if (error) {
       throw new Error(`Failed to upsert batch: ${error.message}`);
     }
+    logger.info('Batch upsert completed', { count: records.length });
   }
 
-  getPatientsByPeriod(reportingPeriod) {
-    try {
-      const rows = this.db
-        .prepare('SELECT * FROM patient_records WHERE reporting_period = ? ORDER BY numero_identificacion')
-        .all(reportingPeriod);
-      return mergePatientRecords(rows);
-    } catch (error) {
+  async getPatientsByPeriod(reportingPeriod) {
+    const { data, error } = await this.supabase
+      .from(TABLE_NAME)
+      .select('*')
+      .eq('reporting_period', reportingPeriod)
+      .order('numero_identificacion');
+
+    if (error) {
       throw new Error(`Failed to get patients for period ${reportingPeriod}: ${error.message}`);
     }
+    return mergePatientRecords(data || []);
   }
 
-  getPatientsByProgram(reportingPeriod, program) {
-    try {
-      return this.db
-        .prepare('SELECT * FROM patient_records WHERE reporting_period = ? AND source_program = ? ORDER BY id')
-        .all(reportingPeriod, program);
-    } catch (error) {
+  async getPatientsByProgram(reportingPeriod, program) {
+    const { data, error } = await this.supabase
+      .from(TABLE_NAME)
+      .select('*')
+      .eq('reporting_period', reportingPeriod)
+      .eq('source_program', program)
+      .order('id');
+
+    if (error) {
       throw new Error(`Failed to get patients for ${program} in ${reportingPeriod}: ${error.message}`);
     }
+    return data || [];
   }
 
-  deletePatientRecord(numeroIdentificacion, reportingPeriod) {
-    try {
-      return this.db
-        .prepare('DELETE FROM patient_records WHERE numero_identificacion = ? AND reporting_period = ?')
-        .run(numeroIdentificacion, reportingPeriod);
-    } catch (error) {
+  async deletePatientRecord(numeroIdentificacion, reportingPeriod) {
+    const { error } = await this.supabase
+      .from(TABLE_NAME)
+      .delete()
+      .eq('numero_identificacion', numeroIdentificacion)
+      .eq('reporting_period', reportingPeriod);
+
+    if (error) {
       throw new Error(`Failed to delete patient ${numeroIdentificacion}: ${error.message}`);
     }
   }
 
-  getReportingPeriods() {
-    try {
-      return this.db
-        .prepare('SELECT DISTINCT reporting_period FROM patient_records ORDER BY reporting_period DESC')
-        .all()
-        .map(row => row.reporting_period);
-    } catch (error) {
+  async getReportingPeriods() {
+    const { data, error } = await this.supabase
+      .from(TABLE_NAME)
+      .select('reporting_period')
+      .order('reporting_period', { ascending: false });
+
+    if (error) {
       throw new Error(`Failed to get reporting periods: ${error.message}`);
     }
+    const unique = [...new Set((data || []).map(r => r.reporting_period))];
+    return unique;
   }
 
-  getPatientCount(reportingPeriod) {
-    try {
-      const row = this.db
-        .prepare('SELECT COUNT(DISTINCT numero_identificacion) as count FROM patient_records WHERE reporting_period = ?')
-        .get(reportingPeriod);
-      return row.count;
-    } catch (error) {
+  async getPatientCount(reportingPeriod) {
+    const { data, error } = await this.supabase
+      .from(TABLE_NAME)
+      .select('numero_identificacion')
+      .eq('reporting_period', reportingPeriod);
+
+    if (error) {
       throw new Error(`Failed to get patient count: ${error.message}`);
     }
-  }
-
-  close() {
-    this.db.close();
-    logger.info('SQLite database connection closed');
+    const unique = new Set((data || []).map(r => r.numero_identificacion));
+    return unique.size;
   }
 }
 
-function buildParams(record) {
-  const params = {
+function buildRow(record) {
+  const row = {
     reporting_period: record.reporting_period,
     source_program: record.source_program,
   };
   for (const col of getColumnNames()) {
-    params[col] = record[col] !== undefined ? record[col] : getDefaultForColumn(col);
+    row[col] = record[col] !== undefined ? record[col] : getDefaultForColumn(col);
   }
-  return params;
-}
-
-function buildIndexes() {
-  return `
-    CREATE INDEX IF NOT EXISTS idx_patient_period ON patient_records(reporting_period);
-    CREATE INDEX IF NOT EXISTS idx_patient_program ON patient_records(source_program);
-    CREATE INDEX IF NOT EXISTS idx_patient_identification ON patient_records(numero_identificacion);
-  `;
+  return row;
 }
 
 function mergePatientRecords(rows) {
