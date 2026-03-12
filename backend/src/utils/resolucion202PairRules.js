@@ -1,4 +1,5 @@
 import { isRealDate, isSentinelDate, numValue } from './resolucion202ValidationHelpers.js';
+import COLUMNS_202 from './resolucion202Columns.js';
 
 const LAB_PAIRS = [
   { dateField: 72, resultFields: [92], label: 'LDL' },
@@ -28,9 +29,16 @@ const LAB_PAIRS = [
   { dateField: 112, resultFields: [113], label: 'Baciloscopia' }
 ];
 
-function isNoResult(value) {
+const NO_RESULT_VALUES = new Set([0, 4, 998, 21]);
+
+function isNoResult(value, resultFieldIndex) {
   const num = Number(value);
-  return num === 0 || num === 998 || num === 21;
+  if (NO_RESULT_VALUES.has(num)) return true;
+  const col = COLUMNS_202.find(c => c.index === resultFieldIndex);
+  if (col && col.defaultValue !== null && col.defaultValue !== undefined) {
+    return num === Number(col.defaultValue);
+  }
+  return false;
 }
 
 function buildRealDateRequiresResult(pair) {
@@ -42,7 +50,7 @@ function buildRealDateRequiresResult(pair) {
     validate: (record) => {
       const dateVal = String(record[pair.dateField]);
       if (!isRealDate(dateVal)) return true;
-      return !isNoResult(record[resultField]);
+      return !isNoResult(record[resultField], resultField);
     }
   }));
 }
@@ -56,7 +64,7 @@ function buildSentinelDateRequiresSentinelResult(pair) {
     validate: (record) => {
       const dateVal = String(record[pair.dateField]);
       if (!isSentinelDate(dateVal)) return true;
-      return isNoResult(record[resultField]);
+      return isNoResult(record[resultField], resultField);
     }
   }));
 }
@@ -66,11 +74,11 @@ function buildNotApplicableDateRequiresZero(pair) {
     code: `E8A${String(pair.dateField).padStart(3, '0')}`,
     type: 'error',
     field: [pair.dateField, resultField],
-    description: `${pair.label}: si fecha (${pair.dateField}) es 1845-01-01 (no aplica), resultado (${resultField}) debe ser 0`,
+    description: `${pair.label}: si fecha (${pair.dateField}) es 1845-01-01 (no aplica), resultado (${resultField}) debe ser 0/21`,
     validate: (record) => {
       const dateVal = String(record[pair.dateField]);
       if (dateVal !== '1845-01-01') return true;
-      return numValue(record, resultField) === 0;
+      return isNoResult(record[resultField], resultField);
     }
   }));
 }

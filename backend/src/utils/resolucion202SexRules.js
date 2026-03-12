@@ -3,8 +3,8 @@ import { numValue, fieldValue } from './resolucion202ValidationHelpers.js';
 function buildMaleSexRules() {
   const gestationalDates = [33, 49, 50, 51, 56, 58];
   const gestationalResults = [23, 35, 59, 60, 61];
-  const cervixNumericFields = [86, 88, 89, 47];
-  const cervixDateFields = [87, 91, 93, 94];
+  const cervixNumericFields = [86, 88, 89, 47, 94];
+  const cervixDateFields = [87, 91, 93];
   const mammoNumericFields = [97, 101];
   const mammoDateFields = [96, 99, 100];
 

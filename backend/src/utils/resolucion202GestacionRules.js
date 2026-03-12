@@ -1,4 +1,4 @@
-import { numValue, isRealDate } from './resolucion202ValidationHelpers.js';
+import { numValue, isRealDate, isSentinelDate } from './resolucion202ValidationHelpers.js';
 
 function buildGestanteActiveRules() {
   return [
@@ -45,65 +45,68 @@ function buildGestanteActiveRules() {
     },
     {
       code: 'E9G078',
-      type: 'error',
+      type: 'warning',
       field: 78,
-      description: 'Gestante activa: fecha hepatitis B debe ser fecha real',
+      description: 'Gestante activa: fecha hepatitis B deberia ser fecha real (sin dato detectado)',
       validate: (record) => {
         if (numValue(record, 14) !== 1) return true;
-        return isRealDate(String(record[78]));
+        const dateVal = String(record[78]);
+        return isRealDate(dateVal) || isSentinelDate(dateVal);
       }
     },
     {
       code: 'E9G079',
-      type: 'error',
+      type: 'warning',
       field: 79,
-      description: 'Gestante activa: resultado hepatitis B no debe ser 0/998/21',
+      description: 'Gestante activa: resultado hepatitis B deberia tener resultado real',
       validate: (record) => {
         if (numValue(record, 14) !== 1) return true;
         const val = numValue(record, 79);
-        return val !== 0 && val !== 998 && val !== 21;
+        return val !== 0 && val !== 998;
       }
     },
     {
       code: 'E9G080',
-      type: 'error',
+      type: 'warning',
       field: 80,
-      description: 'Gestante activa: fecha sifilis debe ser fecha real',
+      description: 'Gestante activa: fecha sifilis deberia ser fecha real (sin dato detectado)',
       validate: (record) => {
         if (numValue(record, 14) !== 1) return true;
-        return isRealDate(String(record[80]));
+        const dateVal = String(record[80]);
+        return isRealDate(dateVal) || isSentinelDate(dateVal);
       }
     },
     {
       code: 'E9G081',
-      type: 'error',
+      type: 'warning',
       field: 81,
-      description: 'Gestante activa: resultado sifilis no debe ser 0/998/21',
+      description: 'Gestante activa: resultado sifilis deberia tener resultado real',
       validate: (record) => {
         if (numValue(record, 14) !== 1) return true;
         const val = numValue(record, 81);
-        return val !== 0 && val !== 998 && val !== 21;
+        return val !== 0 && val !== 998;
       }
     },
     {
       code: 'E9G082',
-      type: 'error',
+      type: 'warning',
       field: 82,
-      description: 'Gestante activa: fecha VIH debe ser fecha real',
+      description: 'Gestante activa: fecha VIH deberia ser fecha real (sin dato detectado)',
       validate: (record) => {
         if (numValue(record, 14) !== 1) return true;
-        return isRealDate(String(record[82]));
+        const dateVal = String(record[82]);
+        return isRealDate(dateVal) || isSentinelDate(dateVal);
       }
     },
     {
       code: 'E9G083',
-      type: 'error',
+      type: 'warning',
       field: 83,
-      description: 'Gestante activa: resultado VIH no debe ser 0/998/21',
+      description: 'Gestante activa: resultado VIH deberia tener resultado real',
       validate: (record) => {
         if (numValue(record, 14) !== 1) return true;
         const val = numValue(record, 83);
-        return val !== 0 && val !== 998 && val !== 21;
+        return val !== 0 && val !== 998;
       }
     }
   ];

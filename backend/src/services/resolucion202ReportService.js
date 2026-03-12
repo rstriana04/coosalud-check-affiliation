@@ -153,25 +153,17 @@ export class Resolucion202ReportService {
   }
 
   buildColumnMapping(headerRow) {
-    const labelToName = new Map();
-    for (const col of COLUMNS_202) {
-      labelToName.set(this.normalizeLabel(col.label), col.name);
-    }
-
     const mapping = {};
+    const totalOfficialCols = COLUMNS_202.length;
+
     headerRow.eachCell({ includeEmpty: false }, (cell, colNumber) => {
-      const normalized = this.normalizeLabel(String(cell.value || ''));
-      if (labelToName.has(normalized)) {
-        mapping[colNumber] = labelToName.get(normalized);
+      if (colNumber <= totalOfficialCols) {
+        mapping[colNumber] = COLUMNS_202[colNumber - 1].name;
       }
     });
 
     logger.debug('Column mapping built', { mappedColumns: Object.keys(mapping).length });
     return mapping;
-  }
-
-  normalizeLabel(label) {
-    return label.toLowerCase().replace(/[^a-z0-9\u00f1]/g, '').trim();
   }
 
   async createZipArchive(files, outputPath) {

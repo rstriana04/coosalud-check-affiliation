@@ -616,7 +616,8 @@ function PeriodConfiguration({
 
 function ValidationResults({ result, expandedRows, onToggleRow }) {
   const hasErrors = result.totalErrors > 0;
-  const errorsByField = buildErrorsByField(result.errors || []);
+  const flatErrors = flattenRecordErrors(result.recordErrors || []);
+  const errorsByField = buildErrorsByField(flatErrors);
 
   if (!hasErrors) {
     return (
@@ -636,7 +637,7 @@ function ValidationResults({ result, expandedRows, onToggleRow }) {
     );
   }
 
-  const errorsByRow = groupErrorsByRow(result.errors || []);
+  const recordErrors = result.recordErrors || [];
 
   return (
     <div className="space-y-4">
@@ -704,30 +705,30 @@ function ValidationResults({ result, expandedRows, onToggleRow }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {Object.entries(errorsByRow).map(([rowNum, rowErrors]) => (
-                  <React.Fragment key={rowNum}>
+                {recordErrors.map(({ row, errors: rowErrors }) => (
+                  <React.Fragment key={row}>
                     <TableRow
                       className="cursor-pointer hover:bg-gray-50"
-                      onClick={() => onToggleRow(rowNum)}
+                      onClick={() => onToggleRow(row)}
                     >
-                      <TableCell className="font-mono font-medium">{rowNum}</TableCell>
+                      <TableCell className="font-mono font-medium">{row}</TableCell>
                       <TableCell colSpan={4}>
                         <div className="flex items-center justify-between">
                           <span className="text-sm text-gray-600">
                             {rowErrors.length} {rowErrors.length === 1 ? 'error' : 'errores'}
                           </span>
                           <span className="text-xs text-gray-400">
-                            {expandedRows.has(rowNum) ? 'Ocultar' : 'Ver detalle'}
+                            {expandedRows.has(row) ? 'Ocultar' : 'Ver detalle'}
                           </span>
                         </div>
                       </TableCell>
                     </TableRow>
-                    {expandedRows.has(rowNum) && rowErrors.map((err, idx) => (
-                      <TableRow key={`${rowNum}-${idx}`} className="bg-red-50/50">
+                    {expandedRows.has(row) && rowErrors.map((err, idx) => (
+                      <TableRow key={`${row}-${idx}`} className="bg-red-50/50">
                         <TableCell />
-                        <TableCell className="text-sm">{err.field}</TableCell>
+                        <TableCell className="text-sm">{err.fieldLabel}</TableCell>
                         <TableCell>
-                          <Badge variant={err.severity === 'error' ? 'destructive' : 'outline'}>
+                          <Badge variant={err.type === 'error' ? 'destructive' : 'outline'}>
                             {err.code}
                           </Badge>
                         </TableCell>
@@ -874,10 +875,21 @@ function ValidationSummaryCard({ label, value, color, icon }) {
   );
 }
 
+function flattenRecordErrors(recordErrors) {
+  const flat = [];
+  for (const { row, errors } of recordErrors) {
+    for (const err of errors) {
+      flat.push({ ...err, row });
+    }
+  }
+  return flat;
+}
+
 function buildErrorsByField(errors) {
   const fieldCounts = {};
   for (const err of errors) {
-    fieldCounts[err.field] = (fieldCounts[err.field] || 0) + 1;
+    const key = err.fieldLabel || err.fieldName || String(err.field);
+    fieldCounts[key] = (fieldCounts[key] || 0) + 1;
   }
 
   const entries = Object.entries(fieldCounts)
@@ -891,16 +903,6 @@ function buildErrorsByField(errors) {
     count,
     percentage: Math.max((count / maxCount) * 100, 5)
   }));
-}
-
-function groupErrorsByRow(errors) {
-  const grouped = {};
-  for (const err of errors) {
-    const key = String(err.row);
-    if (!grouped[key]) grouped[key] = [];
-    grouped[key].push(err);
-  }
-  return grouped;
 }
 
 function isExcelFile(file) {

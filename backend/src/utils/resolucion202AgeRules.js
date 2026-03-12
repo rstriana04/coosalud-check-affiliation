@@ -1,7 +1,14 @@
 import {
-  buildAgeContext, mustBeSentinel
+  buildAgeContext, mustBeSentinel, isSentinelDate, isSentinelResult
 } from './resolucion202ValidationHelpers.js';
 import { getAdultAgeRules } from './resolucion202AdultAgeRules.js';
+
+function wasNeonateDuringPeriod(record, context) {
+  const birthDate = new Date(String(record[9]));
+  const periodStart = new Date(context.reportingPeriodStart);
+  const neonatalEnd = new Date(birthDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+  return neonatalEnd >= periodStart;
+}
 
 function buildNeonatalRules() {
   const numericFields = [37, 38, 48, 85];
@@ -13,11 +20,10 @@ function buildNeonatalRules() {
       code: `E7N${String(fieldIdx).padStart(3, '0')}`,
       type: 'error',
       field: fieldIdx,
-      description: `Campo ${fieldIdx} neonatal: debe ser 0 si edad >= 30 dias`,
+      description: `Campo ${fieldIdx} neonatal: debe ser 0/21 si no fue neonato en el periodo`,
       validate: (record, context) => {
-        const age = buildAgeContext(record, context);
-        if (age.days < 30) return true;
-        return mustBeSentinel(record, fieldIdx, 0);
+        if (wasNeonateDuringPeriod(record, context)) return true;
+        return isSentinelResult(record[fieldIdx]);
       }
     });
   });
@@ -27,11 +33,10 @@ function buildNeonatalRules() {
       code: `E7N${String(fieldIdx).padStart(3, '0')}`,
       type: 'error',
       field: fieldIdx,
-      description: `Campo ${fieldIdx} neonatal: debe ser 1845-01-01 si edad >= 30 dias`,
+      description: `Campo ${fieldIdx} neonatal: debe ser fecha centinela si no fue neonato en el periodo`,
       validate: (record, context) => {
-        const age = buildAgeContext(record, context);
-        if (age.days < 30) return true;
-        return mustBeSentinel(record, fieldIdx, '1845-01-01');
+        if (wasNeonateDuringPeriod(record, context)) return true;
+        return isSentinelDate(String(record[fieldIdx]));
       }
     });
   });

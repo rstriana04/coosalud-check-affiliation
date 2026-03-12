@@ -1,8 +1,8 @@
-import { buildAgeContext, mustBeSentinel } from './resolucion202ValidationHelpers.js';
+import { buildAgeContext, mustBeSentinel, isSentinelDate } from './resolucion202ValidationHelpers.js';
 
 function buildCervixAgeRules() {
-  const numericFields = [86, 88, 89, 47];
-  const dateFields = [87, 91, 93, 94];
+  const numericFields = [86, 88, 89, 47, 94];
+  const dateFields = [87, 91, 93];
 
   const rules = [];
   numericFields.forEach(f => {
@@ -55,11 +55,11 @@ function buildLipidPanelRules() {
     code: `E7L${String(f).padStart(3, '0')}`,
     type: 'error',
     field: f,
-    description: `Campo ${f} fecha lipidos: debe ser 1845-01-01 si edad < 29 anios`,
+    description: `Campo ${f} fecha lipidos: debe ser fecha centinela si edad < 29 anios`,
     validate: (record, context) => {
       const age = buildAgeContext(record, context);
       if (age.years >= 29) return true;
-      return mustBeSentinel(record, f, '1845-01-01');
+      return isSentinelDate(String(record[f]));
     }
   }));
 }

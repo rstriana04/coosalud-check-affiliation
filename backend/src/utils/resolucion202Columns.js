@@ -120,5 +120,11 @@ const COLUMNS_202 = [
   { index: 118, name: 'fecha_trigliceridos', label: 'Fecha toma trigliceridos', type: 'F', maxLength: 10, required: true, defaultValue: null, allowedValues: null, group: 'riesgo_cardiovascular' },
 ];
 
-export { COLUMNS_202 };
+const AUXILIARY_COLUMNS = [
+  { index: 119, name: 'cups', label: 'CUPS', type: 'A', group: 'auxiliar' },
+  { index: 120, name: 'edad_anos', label: 'Edad actual EN AÑOS', type: 'N', group: 'auxiliar' },
+  { index: 121, name: 'fecha_consulta', label: 'FECHA CONSULTA', type: 'F', group: 'auxiliar' },
+];
+
+export { COLUMNS_202, AUXILIARY_COLUMNS };
 export default COLUMNS_202;

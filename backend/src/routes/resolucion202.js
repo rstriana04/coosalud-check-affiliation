@@ -152,8 +152,8 @@ router.post('/validate', upload.single('file'), async (req, res, next) => {
     const service = new Resolucion202ReportService();
     const records = await service.readConsolidatedExcel(req.file.path);
 
-    const validator = new Resolucion202Validator({ periodoInicio, periodoFin });
-    const validationResult = validator.validate(records);
+    const validator = new Resolucion202Validator(periodoInicio, periodoFin);
+    const validationResult = validator.validateFile(records);
 
     res.json({
       valid: validationResult.totalErrors === 0,

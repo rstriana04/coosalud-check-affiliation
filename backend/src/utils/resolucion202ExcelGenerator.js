@@ -1,128 +1,11 @@
 import ExcelJS from 'exceljs';
-import { COLUMNS_202 } from './resolucion202Columns.js';
+import { COLUMNS_202, AUXILIARY_COLUMNS } from './resolucion202Columns.js';
+import { calculateAge } from './resolucion202Defaults.js';
 import { logger } from './logger.js';
 
-const HEADER_LABELS = [
-  'Tipo de registro',
-  'Consecutivo de registro',
-  'Codigo habilitacion IPS primaria',
-  'Tipo de identificacion del usuario',
-  'Numero de identificacion del usuario',
-  'Primer apellido',
-  'Segundo apellido',
-  'Primer nombre',
-  'Segundo nombre',
-  'Fecha de nacimiento',
-  'Sexo',
-  'Codigo pertenencia etnica',
-  'Codigo de ocupacion',
-  'Codigo nivel educativo',
-  'Gestante',
-  'Sifilis gestacional o congenita',
-  'Resultado prueba mini-mental state',
-  'Hipotiroidismo congenito',
-  'Sintomatico respiratorio',
-  'Consumo de tabaco',
-  'Lepra',
-  'Obesidad o desnutricion',
-  'Resultado tacto rectal',
-  'Acido folico preconcepcional',
-  'Resultado sangre oculta materia fecal',
-  'Enfermedad mental',
-  'Cancer de cervix',
-  'Agudeza visual ojo izquierdo',
-  'Agudeza visual ojo derecho',
-  'Fecha del peso',
-  'Peso en kilogramos',
-  'Fecha de la talla',
-  'Talla en centimetros',
-  'Fecha probable de parto',
-  'Codigo pais',
-  'Clasificacion riesgo gestacional',
-  'Resultado colonoscopia',
-  'Resultado tamizaje auditivo neonatal',
-  'Resultado tamizaje visual neonatal',
-  'DPT menores de 5 anos',
-  'Resultado tamizaje VALE',
-  'Neumococo',
-  'Resultado hepatitis C',
-  'Resultado motricidad gruesa',
-  'Resultado motricidad fina',
-  'Resultado personal social',
-  'Resultado audicion lenguaje',
-  'Tratamiento ablativo',
-  'Resultado oximetria',
-  'Fecha atencion parto',
-  'Fecha salida parto',
-  'Fecha lactancia materna',
-  'Fecha consulta valoracion integral',
-  'Fecha asesoria anticoncepcion',
-  'Suministro metodo anticonceptivo',
-  'Fecha suministro anticonceptivo',
-  'Fecha primera consulta prenatal',
-  'Resultado glicemia basal',
-  'Fecha ultimo control prenatal',
-  'Suministro acido folico prenatal',
-  'Suministro sulfato ferroso',
-  'Suministro carbonato calcio',
-  'Fecha agudeza visual',
-  'Fecha tamizaje VALE',
-  'Fecha tacto rectal',
-  'Fecha oximetria',
-  'Fecha colonoscopia',
-  'Fecha sangre oculta',
-  'Consulta psicologia',
-  'Fecha tamizaje auditivo neonatal',
-  'Suministro fortificacion casera',
-  'Suministro vitamina A',
-  'Fecha toma LDL',
-  'Fecha toma PSA',
-  'Preservativos ITS',
-  'Fecha tamizaje visual neonatal',
-  'Fecha salud bucal',
-  'Suministro hierro primera infancia',
-  'Fecha hepatitis B',
-  'Resultado hepatitis B',
-  'Fecha sifilis',
-  'Resultado sifilis',
-  'Fecha VIH',
-  'Resultado VIH',
-  'Fecha TSH neonatal',
-  'Resultado TSH neonatal',
-  'Tamizaje cancer cervix',
-  'Fecha tamizaje cervix',
-  'Resultado tamizaje cervix',
-  'Calidad muestra citologia',
-  'Codigo IPS citologia',
-  'Fecha colposcopia',
-  'Resultado LDL',
-  'Fecha biopsia cervix',
-  'Resultado biopsia cervix',
-  'Resultado HDL',
-  'Fecha mamografia',
-  'Resultado mamografia',
-  'Resultado trigliceridos',
-  'Fecha biopsia mama',
-  'Fecha resultado biopsia mama',
-  'Resultado biopsia mama',
-  'COP por persona',
-  'Fecha hemoglobina',
-  'Resultado hemoglobina',
-  'Fecha glicemia basal',
-  'Fecha creatinina',
-  'Resultado creatinina',
-  'Preservativos ITS fecha',
-  'Resultado PSA',
-  'Fecha hepatitis C',
-  'Fecha toma HDL',
-  'Fecha baciloscopia',
-  'Resultado baciloscopia',
-  'Clasificacion riesgo cardiovascular',
-  'Tratamiento sifilis gestacional',
-  'Tratamiento sifilis congenita',
-  'Clasificacion riesgo metabolico',
-  'Fecha trigliceridos',
-];
+const ALL_EXCEL_COLUMNS = [...COLUMNS_202, ...AUXILIARY_COLUMNS];
+
+const HEADER_LABELS = ALL_EXCEL_COLUMNS.map((col) => col.label);
 
 export async function generateResolucion202Excel(records, outputPath, metadata) {
   const workbook = new ExcelJS.Workbook();
@@ -154,7 +37,7 @@ function getColumnWidth(col) {
 }
 
 function setupColumnWidths(worksheet) {
-  COLUMNS_202.forEach((col, i) => {
+  ALL_EXCEL_COLUMNS.forEach((col, i) => {
     worksheet.getColumn(i + 1).width = getColumnWidth(col);
   });
 }
@@ -186,11 +69,17 @@ function addDataRows(worksheet, records) {
 }
 
 function buildRowValues(record, idx) {
-  return COLUMNS_202.map((col) => {
+  const official = COLUMNS_202.map((col) => {
     if (col.index === 0) return record[col.name] ?? col.defaultValue ?? 2;
     if (col.index === 1) return record[col.name] || idx + 1;
     return resolveFieldValue(record, col);
   });
+
+  const edad = computeAge(record);
+  const cups = record.source_program || record.cups || '';
+  const fechaConsulta = record.fecha_consulta || '';
+
+  return [...official, cups, edad, fechaConsulta];
 }
 
 function resolveFieldValue(record, col) {
@@ -210,11 +99,17 @@ function styleDataRow(row) {
   });
 }
 
+function computeAge(record) {
+  const fechaNac = record.fecha_nacimiento;
+  if (!fechaNac || fechaNac === '1800-01-01') return '';
+  return calculateAge(fechaNac, new Date());
+}
+
 function applyFreezePaneAndFilter(worksheet) {
   worksheet.views = [{ state: 'frozen', ySplit: 1 }];
   worksheet.autoFilter = {
     from: { row: 1, column: 1 },
-    to: { row: 1, column: COLUMNS_202.length },
+    to: { row: 1, column: ALL_EXCEL_COLUMNS.length },
   };
 }
 

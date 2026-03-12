@@ -3,14 +3,26 @@ import { calculateAgeInYears } from './resolucion202ValidationHelpers.js';
 import COLUMNS_202 from './resolucion202Columns.js';
 import { logger } from './logger.js';
 
+const nameToIndex = new Map(COLUMNS_202.map(c => [c.name, c.index]));
+const indexToCol = new Map(COLUMNS_202.map(c => [c.index, c]));
+
 function getFieldName(fieldIndex) {
-  const col = COLUMNS_202.find(c => c.index === fieldIndex);
+  const col = indexToCol.get(fieldIndex);
   return col ? col.name : `campo_${fieldIndex}`;
 }
 
 function getFieldLabel(fieldIndex) {
-  const col = COLUMNS_202.find(c => c.index === fieldIndex);
+  const col = indexToCol.get(fieldIndex);
   return col ? col.label : `Campo ${fieldIndex}`;
+}
+
+function toIndexedRecord(record) {
+  if (record[0] !== undefined || record[1] !== undefined) return record;
+  const indexed = {};
+  for (const [name, index] of nameToIndex) {
+    if (record[name] !== undefined) indexed[index] = record[name];
+  }
+  return indexed;
 }
 
 function buildContext(reportingPeriodStart, reportingPeriodEnd, allRecords) {
@@ -49,12 +61,13 @@ export class Resolucion202Validator {
   }
 
   validateRecord(record, rowIndex) {
+    const indexed = toIndexedRecord(record);
     const context = buildContext(
       this.reportingPeriodStart,
       this.reportingPeriodEnd,
       []
     );
-    const errors = this.runRulesAgainstRecord(record, context);
+    const errors = this.runRulesAgainstRecord(indexed, context);
     return { row: rowIndex, errors };
   }
 
@@ -79,18 +92,19 @@ export class Resolucion202Validator {
 
   validateFile(records) {
     logger.info(`Validating ${records.length} records`);
+    const indexedRecords = records.map(r => toIndexedRecord(r));
     const context = buildContext(
       this.reportingPeriodStart,
       this.reportingPeriodEnd,
-      records
+      indexedRecords
     );
 
     const recordErrors = [];
     let totalErrors = 0;
     let totalWarnings = 0;
 
-    for (let i = 0; i < records.length; i++) {
-      const errors = this.runRulesAgainstRecord(records[i], context);
+    for (let i = 0; i < indexedRecords.length; i++) {
+      const errors = this.runRulesAgainstRecord(indexedRecords[i], context);
       if (errors.length > 0) {
         recordErrors.push({ row: i + 1, errors });
         totalErrors += errors.filter(e => e.type === 'error').length;
