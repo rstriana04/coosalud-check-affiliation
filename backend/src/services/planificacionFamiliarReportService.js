@@ -8,6 +8,8 @@ import { generatePlanificacionFamiliarExcel } from '../utils/planificacionFamili
 import { sendReportEmail } from '../utils/emailService.js';
 import { logger } from '../utils/logger.js';
 import { emitJobProgress, emitLog } from './socketService.js';
+import { databaseService } from './databaseService.js';
+import { mapToResolucion202, deriveReportingPeriod } from '../utils/resolucion202Mapper.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -190,6 +192,16 @@ export class PlanificacionFamiliarReportService {
     const extractedData = await extractor.extract(
       patient.fecha_atencion, patient.nombremedico
     );
+
+    try {
+      const reportingPeriod = deriveReportingPeriod(patient.fecha_atencion);
+      const res202Record = mapToResolucion202(extractedData, 'planificacion-familiar', reportingPeriod);
+      await databaseService.upsertPatientRecord(res202Record);
+    } catch (dbError) {
+      logger.warn('Failed to save to Supabase, continuing', {
+        patient: patient.identipac, error: dbError.message
+      });
+    }
 
     return {
       rowNumber: patient.rowNumber, identipac: patient.identipac,

@@ -8,6 +8,8 @@ import { generateGestantesExcel } from '../utils/gestantesExcelGenerator.js';
 import { sendReportEmail } from '../utils/emailService.js';
 import { logger } from '../utils/logger.js';
 import { emitJobProgress, emitLog } from './socketService.js';
+import { databaseService } from './databaseService.js';
+import { mapToResolucion202, deriveReportingPeriod } from '../utils/resolucion202Mapper.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -192,6 +194,16 @@ export class GestantesReportService {
     const extractedData = await extractor.extract(
       fecha, patient.nombremedico
     );
+
+    try {
+      const reportingPeriod = deriveReportingPeriod(fecha);
+      const res202Record = mapToResolucion202(extractedData, 'seguimiento-gestantes', reportingPeriod);
+      await databaseService.upsertPatientRecord(res202Record);
+    } catch (dbError) {
+      logger.warn('Failed to save to Supabase, continuing', {
+        patient: patient.identipac, error: dbError.message
+      });
+    }
 
     return {
       rowNumber: patient.rowNumber, identipac: patient.identipac,

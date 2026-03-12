@@ -9,6 +9,8 @@ import { getLastPA, savePatientVisit } from '../utils/patientDataStore.js';
 import { sendReportEmail } from '../utils/emailService.js';
 import { logger } from '../utils/logger.js';
 import { emitJobProgress, emitLog, emitJobCompleted, emitJobFailed } from './socketService.js';
+import { databaseService } from './databaseService.js';
+import { mapToResolucion202, deriveReportingPeriod } from '../utils/resolucion202Mapper.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -212,6 +214,17 @@ export class RCVReportService {
       presionArterial: rcvData.presionArterial,
       labs: this.extractLabSummary(rcvData)
     });
+
+    try {
+      const reportingPeriod = deriveReportingPeriod(patient.fecha_atencion);
+      const programa = patient.programa || 'riesgo-cardiovascular';
+      const res202Record = mapToResolucion202(rcvData, programa, reportingPeriod);
+      await databaseService.upsertPatientRecord(res202Record);
+    } catch (dbError) {
+      logger.warn('Failed to save to Supabase, continuing', {
+        patient: patient.identipac, error: dbError.message
+      });
+    }
 
     logger.info(`${logPrefix} Paciente procesado exitosamente`, {
       identipac: patient.identipac
