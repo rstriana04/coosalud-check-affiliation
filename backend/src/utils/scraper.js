@@ -1,6 +1,7 @@
 import { config } from '../config/config.js';
 import { logger } from './logger.js';
 import { browserPool } from '../services/connectionPool.js';
+import { PDFProcessor } from './pdfProcessor.js';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { mkdirSync } from 'fs';
@@ -131,15 +132,11 @@ export class CoosaludScraper {
   async extractDateFromPdf(pdfPath) {
     try {
       logger.debug('Extracting date from PDF...', { pdfPath });
-      
-      const pdfParse = (await import('pdf-parse/lib/pdf-parse.js')).default;
-      const fs = await import('fs');
-      const dataBuffer = fs.readFileSync(pdfPath);
-      
-      const data = await pdfParse(dataBuffer);
-      const text = data.text;
-      
-      logger.debug('PDF text extracted', { 
+
+      const processor = new PDFProcessor(pdfPath);
+      const text = await processor.extractText();
+
+      logger.debug('PDF text extracted', {
         textLength: text.length,
         preview: text.substring(0, 200)
       });

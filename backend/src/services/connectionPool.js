@@ -1,4 +1,4 @@
-import { chromium } from 'playwright';
+import { firefox } from 'playwright';
 import { config } from '../config/config.js';
 import { logger } from '../utils/logger.js';
 
@@ -27,9 +27,8 @@ class BrowserPool {
     }
 
     if (this.activeConnections < this.maxSize) {
-      const browser = await chromium.launch({
-        headless: config.scraping.headlessMode,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+      const browser = await firefox.launch({
+        headless: config.scraping.headlessMode
       });
       this.activeConnections++;
       logger.debug('Created new browser', { 

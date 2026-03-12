@@ -13,7 +13,7 @@ export const config = {
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
   
   redis: {
-    url: process.env.REDIS_URL || 'redis://localhost:6379',
+    url: process.env.REDIS_URL || 'redis://localhost:6380',
     jobProgressTTL: parseInt(process.env.JOB_PROGRESS_TTL || '3600', 10),
     jobHistoryTTL: parseInt(process.env.JOB_HISTORY_TTL || '604800', 10)
   },
