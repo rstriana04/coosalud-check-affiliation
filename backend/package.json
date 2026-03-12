@@ -15,6 +15,7 @@
   "dependencies": {
     "2captcha": "^3.0.5-2",
     "archiver": "^7.0.1",
+    "better-sqlite3": "^12.6.2",
     "bullmq": "^5.1.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",

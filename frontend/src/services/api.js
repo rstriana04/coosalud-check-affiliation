@@ -199,4 +199,58 @@ export const getGestantesDownloadUrl = (jobId) => {
   return `${API_URL}/api/rcb-monthly/rcv-download/${jobId}`;
 };
 
+export const generateResolucion202Report = async (file, options) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('periodoInicio', options.periodoInicio);
+  formData.append('periodoFin', options.periodoFin);
+  if (options.codigoHabilitacion) formData.append('codigoHabilitacion', options.codigoHabilitacion);
+  if (options.codigoEntidad) formData.append('codigoEntidad', options.codigoEntidad);
+  if (options.regimen) formData.append('regimen', options.regimen);
+  if (options.email) formData.append('email', options.email);
+
+  const response = await api.post('/resolucion-202/generate', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 600000
+  });
+  return response.data;
+};
+
+export const generateResolucion202FromDB = async (options) => {
+  const response = await api.post('/resolucion-202/generate-from-db', options);
+  return response.data;
+};
+
+export const validateResolucion202 = async (file, periodoInicio, periodoFin) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('periodoInicio', periodoInicio);
+  formData.append('periodoFin', periodoFin);
+
+  const response = await api.post('/resolucion-202/validate', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 300000
+  });
+  return response.data;
+};
+
+export const getResolucion202JobStatus = async (jobId) => {
+  const response = await api.get(`/resolucion-202/status/${jobId}`);
+  return response.data;
+};
+
+export const getResolucion202DownloadUrl = (jobId) => {
+  return `${API_URL}/api/resolucion-202/download/${jobId}`;
+};
+
+export const getResolucion202Periods = async () => {
+  const response = await api.get('/resolucion-202/periods');
+  return response.data;
+};
+
+export const getResolucion202PatientCount = async (period) => {
+  const response = await api.get(`/resolucion-202/patient-count/${period}`);
+  return response.data;
+};
+
 export default api;

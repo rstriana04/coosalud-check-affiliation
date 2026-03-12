@@ -9,7 +9,7 @@ import {
 } from './ui/Table';
 import {
   FileText, Loader2, Upload, CheckCircle2,
-  XCircle, Download, Mail, HeartPulse, Baby, Users, Heart, Microscope, PersonStanding
+  XCircle, Download, Mail, HeartPulse, Baby, Users, Heart, Microscope, PersonStanding, FileCheck
 } from 'lucide-react';
 import ProgressBar from './ProgressBar';
 import LogsViewer from './LogsViewer';
@@ -22,13 +22,14 @@ import LifecycleReportTab from './LifecycleReportTab';
 import PlanificacionFamiliarReportTab from './PlanificacionFamiliarReportTab';
 import CitologiasReportTab from './CitologiasReportTab';
 import SeguimientoGestantesReportTab from './SeguimientoGestantesReportTab';
+import Resolucion202Tab from './Resolucion202Tab';
 
 const RCV_JOB_KEY = 'current_rcv_job';
 
 export default function RCBMonthly() {
   return (
     <Tabs defaultValue="rcv" className="space-y-6">
-      <TabsList className="grid w-full grid-cols-6 max-w-5xl">
+      <TabsList className="grid w-full grid-cols-7 max-w-5xl">
         <TabsTrigger value="rcv">
           <HeartPulse className="w-4 h-4 mr-2" />
           Informe RCV
@@ -52,6 +53,10 @@ export default function RCBMonthly() {
         <TabsTrigger value="gestantes">
           <PersonStanding className="w-4 h-4 mr-2" />
           Gestantes
+        </TabsTrigger>
+        <TabsTrigger value="resolucion202">
+          <FileCheck className="w-4 h-4 mr-2" />
+          Resolucion 202
         </TabsTrigger>
       </TabsList>
 
@@ -77,6 +82,10 @@ export default function RCBMonthly() {
 
       <TabsContent value="gestantes">
         <SeguimientoGestantesReportTab />
+      </TabsContent>
+
+      <TabsContent value="resolucion202">
+        <Resolucion202Tab />
       </TabsContent>
 
     </Tabs>
